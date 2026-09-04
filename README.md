@@ -125,13 +125,14 @@ documentation lives at [docs.openclaw.ai/gateway/telemetry](https://docs.opencla
 ## Development
 
 ```bash
-npm install
+npm ci
 npm run check     # typecheck + tests
 npm run dev       # local worker at http://localhost:8787
 npm run deploy    # requires Cloudflare credentials for the OpenClaw account
 ```
 
-Deploys also run from GitHub Actions on pushes to `main` (see
+Pull requests run the typecheck, tests, and a Wrangler dry-run build using the committed lockfile.
+Deploys run from GitHub Actions on pushes to `main` (see
 [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)), using the `CLOUDFLARE_API_TOKEN`
 repository secret.
 
