@@ -13,9 +13,9 @@
     "check": "npm run typecheck && npm run test"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^5.20260904.1",
+    "@cloudflare/workers-types": "^5.20260905.1",
     "typescript": "^7.0.2",
-    "vitest": "^4.1.11",
+    "vitest": "^5.0.0",
     "wrangler": "^4.129.0"
   },
   "allowScripts": {

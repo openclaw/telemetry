@@ -124,6 +124,8 @@ documentation lives at [docs.openclaw.ai/gateway/telemetry](https://docs.opencla
 
 ## Development
 
+Use Node.js 24 (the version used in CI) and npm.
+
 ```bash
 npm ci
 npm run check     # typecheck + tests
