@@ -24,6 +24,11 @@ Failed checks do not count as successful daily checks. The update-only request c
 openclaw/2026.8.2 (darwin; node/v26.0.1; arm64; gateway)
 ```
 
+The five-minute version cache is optional: unreadable or invalid entries are treated as misses,
+and cache write failures do not discard a valid npm response. Both sources must provide a nonempty
+version string, which is trimmed before returning it. If npm is unavailable and there is no valid
+cached version, the endpoint returns `503 version_unavailable`.
+
 Feature statistics are **off by default**. Operators can enable them during interactive setup,
 with `openclaw telemetry on`, or with `telemetry.enabled: true`. When enabled, the same request
 carries a small JSON body:

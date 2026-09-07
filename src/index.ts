@@ -41,10 +41,14 @@ function jsonResponse(body: unknown, status = 200, cacheSeconds = 0): Response {
 async function fetchLatestVersion(): Promise<LatestVersion | undefined> {
 	const cache = caches.default;
 	const cacheKey = new Request(UPSTREAM_VERSION_URL, { method: "GET" });
-	const cached = await cache.match(cacheKey);
-	if (cached) {
-		const body = (await cached.json()) as { version?: unknown };
-		if (typeof body.version === "string") return { version: body.version };
+	try {
+		const cached = await cache.match(cacheKey);
+		if (cached) {
+			const version = readVersion(await cached.json());
+			if (version) return { version };
+		}
+	} catch {
+		// Unreadable or malformed cache entries are misses, not failed update checks.
 	}
 
 	const upstream = await fetch(UPSTREAM_VERSION_URL, {
@@ -53,20 +57,34 @@ async function fetchLatestVersion(): Promise<LatestVersion | undefined> {
 	}).catch(() => undefined);
 	if (!upstream?.ok) return undefined;
 
-	const body = (await upstream.json().catch(() => undefined)) as { version?: unknown } | undefined;
-	if (typeof body?.version !== "string" || !body.version.trim()) return undefined;
+	const version = readVersion(await upstream.json().catch(() => undefined));
+	if (!version) return undefined;
 
-	const version = body.version.trim();
-	await cache.put(
-		cacheKey,
-		new Response(JSON.stringify({ version }), {
-			headers: {
-				"content-type": "application/json",
-				"cache-control": `public, max-age=${VERSION_CACHE_SECONDS}`,
-			},
-		}),
-	);
+	try {
+		await cache.put(
+			cacheKey,
+			new Response(JSON.stringify({ version }), {
+				headers: {
+					"content-type": "application/json",
+					"cache-control": `public, max-age=${VERSION_CACHE_SECONDS}`,
+				},
+			}),
+		);
+	} catch {
+		// A cache write failure must not discard a valid upstream answer.
+	}
 	return { version };
+}
+
+function readVersion(body: unknown): string | undefined {
+	if (
+		typeof body !== "object" ||
+		body === null ||
+		!("version" in body) ||
+		typeof body.version !== "string"
+	)
+		return undefined;
+	return body.version.trim() || undefined;
 }
 
 async function withinRateLimit(request: Request, env: Env, prefix = ""): Promise<boolean> {

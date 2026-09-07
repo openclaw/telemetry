@@ -4,6 +4,7 @@
 
 **Highlights:** Public update checks and seven-day usage aggregates, with optional feature statistics and no stored install identifiers.
 
+- Preserve successful update responses when the version cache fails, and validate cached versions with the same nonempty-string rules as npm responses.
 - Bound User-Agent parsing before matching and reject malformed feature IDs without converting them into public names.
 - Aggregate the complete retained public vocabulary without joint-group truncation, fail closed on incomplete query results, and expose fixed windows and query-local report totals and event watermarks. Label public counts as reports and configuration or inventory, preserving the legacy `installs` API alias.
 - Preserve the ten-minute public stats freshness limit on cache hits without resetting their age, and refresh entries when the cache retains them beyond that limit.
