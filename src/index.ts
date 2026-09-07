@@ -92,7 +92,16 @@ async function handlePublicStats(request: Request, env: Env): Promise<Response> 
 	// Cache availability must not decide whether a successful SQL result is served.
 	const cached = await cache.match(cacheKey).catch(() => undefined);
 	if (cached) {
-		return cached;
+		const ageHeader = cached.headers.get("age") ?? "";
+		const age = /^\d+$/u.test(ageHeader) ? Number(ageHeader) : NaN;
+		if (age < STATS_CACHE_SECONDS) {
+			// Cache policy can widen max-age. Restore our bound without resetting Age.
+			const response = new Response(cached.body, cached);
+			response.headers.set("cache-control", `public, max-age=${STATS_CACHE_SECONDS}`);
+			return response;
+		}
+		// A tee's cancellation can wait for another reader; do not delay the miss.
+		void cached.body?.cancel().catch(() => {});
 	}
 
 	// Keep public reads independent of the existing, unprefixed recording counter.

@@ -18,6 +18,7 @@ function memoryCache(): MemoryCache {
 		},
 		async put(request, response) {
 			const url = request instanceof Request ? request.url : String(request);
+			response.headers.set("age", "0");
 			store.set(url, response);
 		},
 	};
@@ -108,7 +109,7 @@ describe("GET /api/stats", () => {
 		expect(body.versions[0]?.version).toBe("2026.8.2");
 	});
 
-	it("reuses cached stats without SQL or quota and preserves their age", async () => {
+	it("restores the stats TTL on cache hits without resetting their age or using SQL or quota", async () => {
 		const limit = vi.fn().mockResolvedValue({ success: true });
 		const env = testEnv({ RATE_LIMIT: { limit } });
 		const first = await worker.fetch(
@@ -118,7 +119,10 @@ describe("GET /api/stats", () => {
 		const firstBody = await first.json();
 		expect(sqlCalls).toBe(3);
 		limit.mockResolvedValue({ success: false });
-		for (const stored of cache.store.values()) stored.headers.set("age", "590");
+		for (const stored of cache.store.values()) {
+			stored.headers.set("age", "590");
+			stored.headers.set("cache-control", "public, max-age=14400");
+		}
 
 		const second = await worker.fetch(
 			new Request("https://telemetry.example/api/stats"),
@@ -130,7 +134,48 @@ describe("GET /api/stats", () => {
 		expect(limit).toHaveBeenCalledTimes(1);
 		expect(second.headers.get("access-control-allow-origin")).toBe("*");
 		expect(second.headers.get("age")).toBe("590");
+		expect(second.headers.get("cache-control")).toBe("public, max-age=600");
+		for (const stored of cache.store.values()) {
+			expect(stored.headers.get("cache-control")).toBe("public, max-age=14400");
+		}
 		await expect(second.json()).resolves.toEqual(firstBody);
+	});
+
+	it.each([
+		{ age: "600", available: true, allowed: true, status: 200, queries: 6 },
+		{ age: "14400", available: true, allowed: true, status: 200, queries: 6 },
+		{ age: null, available: true, allowed: true, status: 200, queries: 6 },
+		{ age: "invalid", available: true, allowed: true, status: 200, queries: 6 },
+		{ age: "", available: true, allowed: true, status: 200, queries: 6 },
+		{ age: "1.5", available: true, allowed: true, status: 200, queries: 6 },
+		{ age: "1e-3", available: true, allowed: true, status: 200, queries: 6 },
+		{ age: "+1", available: true, allowed: true, status: 200, queries: 6 },
+		{ age: "-0", available: true, allowed: true, status: 200, queries: 6 },
+		{ age: "601", available: false, allowed: true, status: 503, queries: 6 },
+		{ age: "601", available: true, allowed: false, status: 429, queries: 3 },
+	])("treats cache age $age as a miss (available=$available, allowed=$allowed)", async ({ age, available, allowed, status, queries }) => {
+		const limit = vi.fn().mockResolvedValue({ success: true });
+		const env = testEnv({ RATE_LIMIT: { limit } });
+		expect((await worker.fetch(request(), env)).status).toBe(200);
+		for (const stored of cache.store.values()) {
+			stored.headers.set("cache-control", "public, max-age=14400");
+			if (age === null) stored.headers.delete("age");
+			else stored.headers.set("age", age);
+		}
+		sqlAvailable = available;
+		limit.mockResolvedValue({ success: allowed });
+
+		const response = await worker.fetch(request(), env);
+		expect(response.status).toBe(status);
+		expect(sqlCalls).toBe(queries);
+		expect(limit).toHaveBeenCalledTimes(2);
+		expect(response.headers.get("age")).toBeNull();
+		expect(response.headers.get("cache-control")).toBe(status === 200 ? "public, max-age=600" : "no-store");
+		if (status !== 200) {
+			await expect(response.json()).resolves.toEqual({
+				error: status === 429 ? "rate_limited" : "stats_unavailable",
+			});
+		}
 	});
 
 	it("rate-limits a cache miss before queryPublicStats", async () => {

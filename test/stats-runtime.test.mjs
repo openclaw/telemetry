@@ -6,7 +6,7 @@ import { experimental_readRawConfig } from "wrangler";
 const require = createRequire(import.meta.url);
 const wranglerRequire = createRequire(require.resolve("wrangler"));
 const { build } = wranglerRequire("esbuild");
-const { Miniflare, convertV4MiniflareOptions } = wranglerRequire("miniflare");
+const { Miniflare, Response: RuntimeResponse, convertV4MiniflareOptions } = wranglerRequire("miniflare");
 const { rawConfig } = experimental_readRawConfig({ config: "wrangler.jsonc" });
 
 describe("stats over workerd HTTP", () => {
@@ -115,6 +115,41 @@ describe("stats over workerd HTTP", () => {
 		expect((await get()).status).toBe(200);
 		expect(sqlCalls).toBe(9);
 		console.log("workerd: unavailable=503,503 SQL=6; recovery=200 hit=200 total-SQL=9");
+	}, 30_000);
+
+	it("restores the public TTL while preserving cache age and refreshing expired entries", async () => {
+		await start();
+		const first = await get();
+		expect(first.status).toBe(200);
+		const body = await first.text();
+		const cache = (await runtime.getCaches()).default;
+		const key = "https://telemetry.openclaw.ai/api/stats";
+		const putAged = (age) => cache.put(key, new RuntimeResponse(body, {
+			headers: {
+				"content-type": "application/json; charset=utf-8",
+				"cache-control": "public, max-age=14400",
+				"access-control-allow-origin": "*",
+				age: String(age),
+			},
+		}));
+
+		await putAged(590);
+		const warm = await get();
+		expect(warm.status).toBe(200);
+		expect(warm.headers.get("cache-control")).toBe("public, max-age=600");
+		expect(Number(warm.headers.get("age"))).toBeGreaterThanOrEqual(590);
+		expect(Number(warm.headers.get("age"))).toBeLessThan(600);
+		expect(warm.headers.get("access-control-allow-origin")).toBe("*");
+		await expect(warm.text()).resolves.toBe(body);
+		expect(sqlCalls).toBe(3);
+
+		await putAged(600);
+		const refreshed = await get();
+		expect(refreshed.status).toBe(200);
+		expect(refreshed.headers.get("cache-control")).toBe("public, max-age=600");
+		expect(refreshed.headers.get("age")).toBeNull();
+		expect(sqlCalls).toBe(6);
+		console.log("workerd: widened cache TTL restored to 600; Age>=590/body preserved; Age=600 refresh adds SQL=3");
 	}, 30_000);
 
 	it("keeps recording and stats-miss quotas independent in both directions", async () => {
