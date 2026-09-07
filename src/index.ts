@@ -13,6 +13,11 @@ const UPSTREAM_TIMEOUT_MS = 5_000;
  * out of the hot path while never serving a stale release for long.
  */
 const VERSION_CACHE_SECONDS = 300;
+/**
+ * JSON Cache-Control is not a default edge hit, so store the same 600s TTL.
+ */
+const STATS_CACHE_SECONDS = 600;
+const STATS_CACHE_KEY = "https://telemetry.openclaw.ai/api/stats";
 
 /**
  * Operator-visible note attached to update checks. Keep empty in normal
@@ -64,17 +69,43 @@ async function fetchLatestVersion(): Promise<LatestVersion | undefined> {
 	return { version };
 }
 
+async function withinRateLimit(request: Request, env: Env, prefix = ""): Promise<boolean> {
+	const limiter = env.RATE_LIMIT;
+	if (!limiter) return true;
+	const key = prefix + (request.headers.get("cf-connecting-ip") ?? "unknown");
+	const outcome = await limiter.limit({ key }).catch(() => undefined);
+	return outcome?.success !== false;
+}
+
 /**
  * Per-IP limit on how many requests may be *recorded*. A real install reports
  * once a day, so this only bites on floods. The client IP is used for the
  * decision and never stored.
  */
 async function mayRecord(request: Request, env: Env): Promise<boolean> {
-	const limiter = env.RATE_LIMIT;
-	if (!limiter) return true;
-	const key = request.headers.get("cf-connecting-ip") ?? "unknown";
-	const outcome = await limiter.limit({ key }).catch(() => undefined);
-	return outcome?.success !== false;
+	return withinRateLimit(request, env);
+}
+
+async function handlePublicStats(request: Request, env: Env): Promise<Response> {
+	const cache = caches.default;
+	const cacheKey = new Request(STATS_CACHE_KEY, { method: "GET" });
+	// Cache availability must not decide whether a successful SQL result is served.
+	const cached = await cache.match(cacheKey).catch(() => undefined);
+	if (cached) {
+		return cached;
+	}
+
+	// Keep public reads independent of the existing, unprefixed recording counter.
+	if (!(await withinRateLimit(request, env, "stats:"))) {
+		return jsonResponse({ error: "rate_limited" }, 429);
+	}
+
+	const stats = await queryPublicStats(env);
+	if (!stats) return jsonResponse({ error: "stats_unavailable" }, 503);
+
+	const response = jsonResponse(stats, 200, STATS_CACHE_SECONDS);
+	await cache.put(cacheKey, response.clone()).catch(() => {});
+	return response;
 }
 
 async function recordRequest(request: Request, env: Env): Promise<void> {
@@ -122,9 +153,7 @@ export default {
 		}
 
 		if (url.pathname === "/api/stats") {
-			const stats = await queryPublicStats(env);
-			if (!stats) return jsonResponse({ error: "stats_unavailable" }, 503);
-			return jsonResponse(stats, 200, 600);
+			return handlePublicStats(request, env);
 		}
 
 		if (url.pathname === "/" || url.pathname === "/index.html") {

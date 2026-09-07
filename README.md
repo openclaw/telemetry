@@ -90,6 +90,10 @@ the edge and in validation:
   catalogs, and versions must match the real release format. Invented values become `unknown`
   rather than appearing on the public page. If the catalogs cannot be fetched, names are dropped
   and only counts are recorded — this fails closed rather than publishing unverified text.
+- **Public stats caching.** Aggregate responses are cached for ten minutes. Cache misses have a
+  separate per-IP limit of 20 requests per minute using the same binding; they do not consume
+  recording capacity, and cache hits consume neither counter. Denied misses return `429`
+  without querying Analytics Engine. Cache failures do not prevent successful SQL responses.
 - **Plausibility.** Raw rows are retained, so a skew attempt appears as a discontinuity in a
   dimension and can be discounted after the fact.
 

@@ -4,7 +4,7 @@ export type RateLimiter = {
 
 export type Env = {
 	TELEMETRY: AnalyticsEngineDataset;
-	/** Per-IP recording limit. Absent in local dev, where every request counts. */
+	/** Per-IP limits with separate recording and stats-miss counters. */
 	RATE_LIMIT?: RateLimiter;
 	/** Cloudflare account id, used only by the public /api/stats aggregation query. */
 	ACCOUNT_ID?: string;
