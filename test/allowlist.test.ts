@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { keepKnownNames, loadKnownNames, normalizeVersion } from "../src/allowlist.js";
-import { PUBLIC_NAMES } from "../src/public-vocabulary.js";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -43,19 +42,24 @@ describe("keepKnownNames", () => {
 });
 
 describe("public vocabulary", () => {
-	it("accepts packaged plugin and provider IDs while rejecting private names", async () => {
-		vi.stubGlobal("caches", {
-			default: { match: vi.fn(), put: vi.fn() },
-		});
-		vi.stubGlobal("fetch", vi.fn(async () => Response.json({ entries: [] })));
+	it("works without platform caches and isolates each caller's vocabulary", async () => {
+		vi.stubGlobal("caches", undefined);
+		vi.stubGlobal("fetch", vi.fn(() => { throw new Error("No upstream service"); }));
+		const first = await loadKnownNames();
+		expect(first.has("browser")).toBe(true);
+		first.delete("browser");
+		first.add("acme-internal-crm");
+		const second = await loadKnownNames();
+		expect(keepKnownNames(["browser", "acme-internal-crm"], second)).toEqual(["browser"]);
+	});
 
+	it("accepts packaged plugin and provider IDs while rejecting private names", async () => {
 		const known = await loadKnownNames();
 		const publicNames = ["browser", "canvas", "lmstudio", "memory-core", "ollama", "openrouter", "vllm"];
 		expect(keepKnownNames([...publicNames, "acme-internal-crm", "spam-link"], known)).toEqual(publicNames);
 	});
 
 	it("retains external catalog identities, removed entries, and reviewed legacy aliases offline", async () => {
-		vi.stubGlobal("caches", { default: { match: vi.fn(), put: vi.fn() } });
 		const fetch = vi.fn(() => { throw new Error("No runtime catalog access"); });
 		vi.stubGlobal("fetch", fetch);
 		const known = await loadKnownNames();
@@ -66,16 +70,9 @@ describe("public vocabulary", () => {
 		expect(fetch).not.toHaveBeenCalled();
 	});
 
-	it("does not admit private names from stale or malformed cache content", async () => {
-		const match = vi.fn(async () => Response.json(["discord", "acme-internal-crm"]));
-		const put = vi.fn(async (_key: Request, _response: Response) => {});
-		vi.stubGlobal("caches", { default: { match, put } });
+	it("excludes private and non-packaged IDs from the retained public vocabulary", async () => {
 		const known = await loadKnownNames();
 		expect(keepKnownNames(["browser", "acme-internal-crm", "qa-channel", "qa-lab", "visitor-access"], known))
 			.toEqual(["browser"]);
-		expect(known).toEqual(new Set(PUBLIC_NAMES));
-		const [key, response] = put.mock.calls[0]!;
-		expect(key.url).not.toBe("https://telemetry.openclaw.ai/internal/known-names");
-		expect(await response.json()).toEqual(PUBLIC_NAMES);
 	});
 });

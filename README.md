@@ -183,7 +183,9 @@ The initial snapshot includes all catalog revisions on the public main history s
 Refreshes append snapshots; never remove older ones during routine updates. This retains removed or
 renamed public entries for the entire seven-day stats window, including names admitted by the older
 moving-catalog implementation. New public names remain rejected until reviewed metadata is deployed.
-The internal allowlist cache namespace changes automatically with vocabulary content.
+The vocabulary is compiled into the Worker. Loading it requires neither upstream requests nor
+Cache API access, so old allowlist cache entries cannot be reused and cache outages cannot interrupt
+name validation. Each caller receives a fresh set.
 
 Historical rows may contain mixed-case names or case-distinct duplicates from older validation.
 This repair canonicalizes new rows only; stats consumers must validate historical coverage and handle
