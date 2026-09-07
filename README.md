@@ -4,8 +4,8 @@ The Cloudflare Worker behind [telemetry.openclaw.ai](https://telemetry.openclaw.
 daily update check that OpenClaw installs make, and records anonymous aggregates from those requests.
 
 This repository is public because that is the whole point: you should not have to take our word for
-what the server keeps. It is about 300 lines, and [`src/payload.ts`](src/payload.ts) is the only
-place where anything a client sends becomes something we store.
+what the server keeps. [`src/payload.ts`](src/payload.ts) defines the Analytics Engine row
+written from a validated request.
 
 ## What it does
 
@@ -17,15 +17,16 @@ place where anything a client sends becomes something we store.
 
 ## What an install sends
 
-Every OpenClaw install that has update checks enabled asks this service for the latest version at
-most once every 24 hours. That request carries a User-Agent and nothing else:
+With automatic update checks enabled, OpenClaw reuses a successful version check for 24 hours.
+Failed checks do not count as successful daily checks. The update-only request carries a User-Agent:
 
 ```
 openclaw/2026.8.2 (darwin; node/v26.0.1; arm64; gateway)
 ```
 
-If the operator answered **yes** to "Help make OpenClaw better?" during setup — a question that
-defaults to **no** — the same request carries a small JSON body:
+Feature statistics are **off by default**. Operators can enable them during interactive setup,
+with `openclaw telemetry on`, or with `telemetry.enabled: true`. When enabled, the same request
+carries a small JSON body:
 
 ```json
 {
@@ -44,7 +45,8 @@ defaults to **no** — the same request carries a small JSON body:
 }
 ```
 
-Installs that were never asked interactively — Docker, CI, scripted setups — never send the body.
+Interactive setup defaults to **No thanks**; guided Quick Start skips that prompt. Scripted installs
+do not opt in automatically. The enabled setting, not a recorded prompt response, controls inclusion.
 The server limits feature-statistics bodies to 16 KiB while reading the upload. Oversized or
 malformed bodies are discarded, and the request still receives its version answer.
 
@@ -59,24 +61,62 @@ One Analytics Engine row per request, with these columns and no others:
 | `blob3` | Architecture (`arm64`, `x64`) |
 | `blob4` | Runtime (`node/v26.0.1`, `bun/1.2.0`) |
 | `blob5` | Surface (`gateway`, `cli`) |
-| `blob6` | Opted-in channel ids, comma-joined |
-| `blob7` | Opted-in provider families, comma-joined |
-| `blob8` | Opted-in plugin ids, comma-joined |
+| `blob6` | Configured, not explicitly disabled public channel IDs, comma-joined |
+| `blob7` | Public provider IDs from configuration, auth profiles, and model references, comma-joined |
+| `blob8` | Public plugin IDs from enabled inventory, comma-joined |
 | `double1` | `1` if the request included feature stats, else `0` |
 | `double2` | Total enabled plugin count, including plugins not named above |
-| `double3` | Sessions in the last 24 hours |
+| `double3` | Retained session-creation events timestamped within the preceding 24 hours |
+
+The fields describe configuration and inventory, not plugin invocations, provider requests, or
+channel activity. With an active plugin registry, inventory includes enabled, loaded plugins whose
+code was imported and loaded bundle-format plugins; without it, collection uses configured manifest
+enablement. The session count depends on creation events still retained in a bounded local store.
+Missing or unreadable state produces zero; this is not active sessions, messages, or all sessions
+that existed that day.
 
 Unknown keys in a request body are dropped rather than stored, so a future client cannot silently
 widen what this service keeps. Values are length-bounded and character-filtered before they are
 written.
 
 Only **publicly known** plugin, channel, and provider ids are ever named. The client reports names
-only for plugins bundled with OpenClaw or published in its official catalog, and this server
+only for plugins bundled with OpenClaw, trusted official installs, or entries in its official catalog, and this server
 independently checks every name against a checked-in vocabulary generated from immutable public
 packaging metadata, provider declarations, and official catalogs. Public vocabulary history is
 retained when names disappear from current catalogs. Privately developed
-plugins are counted in `double2` but never named, because a private plugin id would identify the
-organization running it.
+plugins can contribute to `double2` but are not named. Filtering and deduplication also affect named
+counts, so the difference between total inventory and named plugins is not a reliable private-plugin count.
+
+## Public aggregates
+
+`GET /api/stats` reports weighted estimates over one fixed seven-day UTC interval:
+`windowStart` is inclusive and `windowEnd` is exclusive. All statements use those same bounds.
+`generatedAt` is the response-generation clock, not evidence that data arrived at that time.
+
+- `summary.totalPings` and `summary.featureReports` come from their own summary query, not the
+  top version/platform rows or feature marginals. `latestEventAt` and `latestFeatureEventAt`
+  are that query's latest recorded event timestamps.
+- `versions[].pings` and `platforms[].pings` retain their top-25 API semantics.
+- `channels`, `providerFamilies`, and `plugins` retain their label fields and legacy `installs`
+  counts. Each entry adds `reports`, equal to `installs`. Both mean weighted reports, not
+  unique installations, users, or feature invocations.
+- `featureMetadata` provides each category's own `featureReports` denominator and
+  `latestFeatureEventAt`. Query-time sampling can produce different totals and watermarks
+  between categories and the summary. These are independent estimates, not one database snapshot.
+  Percentages must use only the matching category's denominator.
+
+Each category runs one complete statement over the entire retained public vocabulary. A same-query
+weighted token-length checksum verifies that no unknown, malformed, repeated, or mixed-case tokens
+were silently omitted. Queries are limited to 9,500 UTF-8 bytes; vocabulary growth beyond this bound
+fails tests and runtime requests rather than truncating names or splitting a category across samples.
+Missing or malformed results, failed required queries, or incomplete coverage return `503`, not empty
+success. Genuine empty aggregates have zero counts and null event watermarks.
+
+Responses use a ten-minute server cache, retaining `Age` on hits. The page bypasses its browser cache
+to avoid older response contracts but still reuses the Worker's server cache. It displays top-ten
+tables of reports, category-local bases and watermarks, and the separate response-generation time.
+Accepting additional public names increases coverage; it does not by itself establish increased adoption
+or backfill reports whose names were previously rejected.
 
 ## Abuse resistance
 
@@ -127,9 +167,14 @@ Cloudflare's separate infrastructure-level processing.
 | --- | --- |
 | `openclaw telemetry off` | Stops the feature-stats body. Update checks continue. |
 | `DO_NOT_TRACK=1` | Same, enforced from the environment. |
-| `update.checkOnStart: false` | Stops everything: no update check, no telemetry, no requests. |
+| `update.checkOnStart: false` | Stops both tiers of automatic update requests. Explicit update commands and other configured services are separate. |
 
-`openclaw telemetry show` prints the exact request an install would make right now. Client-side
+`OPENCLAW_NO_AUTO_UPDATE=1` also prevents automatic update requests. A truthy `CI` suppresses both
+tiers unless a replacement `OPENCLAW_TELEMETRY_ENDPOINT` is explicitly configured.
+
+`openclaw telemetry show` displays policy and a CLI-built payload preview, not the exact next Gateway
+payload: registry state, configuration, and collection time can differ. When policy suppresses requests,
+it shows `Request: none` (`request: null` in JSON). Client-side
 documentation lives at [docs.openclaw.ai/gateway/telemetry](https://docs.openclaw.ai/gateway/telemetry).
 
 ## Development

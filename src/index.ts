@@ -17,7 +17,7 @@ const VERSION_CACHE_SECONDS = 300;
  * JSON Cache-Control is not a default edge hit, so store the same 600s TTL.
  */
 const STATS_CACHE_SECONDS = 600;
-const STATS_CACHE_KEY = "https://telemetry.openclaw.ai/api/stats";
+const STATS_CACHE_KEY = "https://telemetry.openclaw.ai/api/stats?cache=reports-v2";
 
 /**
  * Operator-visible note attached to update checks. Keep empty in normal
