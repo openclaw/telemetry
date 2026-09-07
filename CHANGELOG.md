@@ -4,6 +4,7 @@
 
 **Highlights:** Public update checks and seven-day usage aggregates, with optional feature statistics and no stored install identifiers.
 
+- Preserve the ten-minute public stats freshness limit on cache hits without resetting their age, and refresh entries when the cache retains them beyond that limit.
 - Cache public stats for ten minutes, rate-limit cache misses independently of recording, and keep successful stats available when cache operations fail. Thanks @SebTardif.
 - Disable Worker observability and request logging, and clarify transient IP use for rate limiting versus Analytics Engine storage and Cloudflare infrastructure processing.
 - Serve the latest OpenClaw release with a five-minute npm cache and an optional urgent-release note.

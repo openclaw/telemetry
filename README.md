@@ -94,6 +94,8 @@ the edge and in validation:
   separate per-IP limit of 20 requests per minute using the same binding; they do not consume
   recording capacity, and cache hits consume neither counter. Denied misses return `429`
   without querying Analytics Engine. Cache failures do not prevent successful SQL responses.
+  Cache hits retain their age and the ten-minute freshness limit; older entries are treated
+  as misses even if the cache retains them longer.
 - **Plausibility.** Raw rows are retained, so a skew attempt appears as a discontinuity in a
   dimension and can be discounted after the fact.
 
