@@ -59,13 +59,15 @@ footer { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--line
 }</code></pre>
 <p>That question defaults to <strong>no</strong>, and installs that were never asked interactively — Docker, CI, scripted setups — never send it.</p>
 
-<h2>What we never collect</h2>
+<h2>What we exclude from Analytics Engine</h2>
 <ul class="never">
 <li>Message content, prompts, model output, file contents, or file paths</li>
 <li>Credentials, tokens, or secret references</li>
 <li>IP addresses, hostnames, usernames, or account identifiers</li>
-<li>Any install ID or device ID — daily pings are <strong>unlinkable</strong>, so we cannot tell whether two reports came from the same machine</li>
+<li>Any install ID or device ID</li>
 </ul>
+<p>The Worker reads the client IP transiently for Cloudflare's rate limiter, but does not write it to Analytics Engine. Worker observability, logs, and invocation logs are disabled in the deployment configuration.</p>
+<p>Cloudflare handles TLS and network requests and sees client IP addresses. Its separate infrastructure-level processing is not described or controlled by these Worker logging settings.</p>
 
 <h2>How to turn it off</h2>
 <table>

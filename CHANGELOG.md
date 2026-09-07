@@ -4,6 +4,7 @@
 
 **Highlights:** Public update checks and seven-day usage aggregates, with optional feature statistics and no stored install identifiers.
 
+- Disable Worker observability and request logging, and clarify transient IP use for rate limiting versus Analytics Engine storage and Cloudflare infrastructure processing.
 - Serve the latest OpenClaw release with a five-minute npm cache and an optional urgent-release note.
 - Publish seven-day version, platform, channel, provider, and plugin aggregates through the public stats API and homepage.
 - Validate reported names against public catalogs, count private plugins without naming them, and rate-limit recording while preserving update responses.

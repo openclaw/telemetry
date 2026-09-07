@@ -84,8 +84,8 @@ the edge and in validation:
 
 - **Per-IP rate limiting** on what gets *recorded*. A real install reports once a day, so the limit
   only bites on floods. Over-limit callers still receive their version answer; they simply stop
-  counting, so a busy NAT never loses update checks. The IP is used for the decision and never
-  stored.
+  counting, so a busy NAT never loses update checks. The Worker reads the IP transiently for
+  this decision and does not write it to Analytics Engine.
 - **Vocabulary allowlisting.** Every reported name is checked against the published OpenClaw
   catalogs, and versions must match the real release format. Invented values become `unknown`
   rather than appearing on the public page. If the catalogs cannot be fetched, names are dropped
@@ -97,19 +97,21 @@ An attacker willing to distribute traffic can still inflate counts for things th
 That is inherent to unauthenticated census data, and acceptable: these numbers inform which features
 get attention, not billing or security decisions.
 
-## What is never stored
+## What is excluded from Analytics Engine
 
 - Message content, prompts, model output, file contents, or file paths
 - Credentials, tokens, or secret references
 - IP addresses, hostnames, usernames, or account identifiers
 - Any install ID or device ID
 
-There is deliberately no identifier of any kind, which means **daily pings are unlinkable**: we
-cannot tell whether two reports came from the same machine, and therefore cannot build retention
-curves or per-install histories. That is a real analytical cost, accepted on purpose.
+These Analytics Engine rows contain no install or device identifier, so the service does not
+maintain per-install histories or retention curves.
 
-Cloudflare terminates the TLS connection and therefore sees client IPs, as any host would. This
-Worker never reads, forwards, or records them, and request logging is not enabled on it.
+Cloudflare handles TLS and network requests and sees client IP addresses. The Worker reads
+`cf-connecting-ip` transiently and passes it to Cloudflare's rate-limiting binding; it does not
+write that IP to Analytics Engine. Worker observability, logs, and invocation logs are explicitly
+disabled in [`wrangler.jsonc`](wrangler.jsonc). These settings do not describe or control
+Cloudflare's separate infrastructure-level processing.
 
 ## Turning it off
 
