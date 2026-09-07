@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
+import { readProviderOverlays } from "./lib/public-provider-overlays.mjs";
 
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
 const METADATA = join(ROOT, "data/public-vocabulary.json");
@@ -41,16 +42,6 @@ function collectCatalog(body, names) {
 			if (section?.id) addName(names, section.id);
 		}
 	}
-}
-
-function readProviderOverlays(source) {
-	// This upstream contract is a literal Set, not an executable metadata API.
-	// Reject changed syntax instead of evaluating source or guessing new IDs.
-	const literal = source.match(
-		/\bconst BUILT_IN_MODEL_PROVIDER_OVERLAY_IDS = new Set\(\s*(\[(?:\s*"[^"\\]*"\s*,?)*\s*\])\s*\)/u,
-	)?.[1];
-	if (!literal) throw new Error("Upstream provider overlay declaration changed; review its contract");
-	return JSON.parse(literal.replace(/,\s*\]$/u, "]"));
 }
 
 /** Read immutable Git objects, never the source checkout's working files. */
