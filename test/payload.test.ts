@@ -1,16 +1,19 @@
 import { describe, expect, it } from "vitest";
+import { keepKnownNames, loadKnownNames } from "../src/allowlist.js";
 import { buildDataPoint } from "../src/analytics.js";
 import { parseClientIdentity, parseFeatureStats } from "../src/payload.js";
 
 describe("parseClientIdentity", () => {
 	it("reads version, platform, runtime, arch and surface from the client User-Agent", () => {
-		expect(parseClientIdentity("openclaw/2026.8.2 (darwin; node/v26.0.1; arm64; gateway)")).toEqual({
-			version: "2026.8.2",
-			platform: "darwin",
-			runtime: "node/v26.0.1",
-			arch: "arm64",
-			surface: "gateway",
-		});
+		expect(parseClientIdentity("openclaw/2026.8.2 (darwin; node/v26.0.1; arm64; gateway)")).toEqual(
+			{
+				version: "2026.8.2",
+				platform: "darwin",
+				runtime: "node/v26.0.1",
+				arch: "arm64",
+				surface: "gateway",
+			},
+		);
 	});
 
 	it("treats a missing surface as unknown rather than failing the parse", () => {
@@ -22,12 +25,35 @@ describe("parseClientIdentity", () => {
 	});
 
 	it("degrades unparseable and absent User-Agents to unknown", () => {
-		for (const value of [null, "", "curl/8.4.0", "openclaw/"]) {
+		for (const value of [
+			null,
+			"",
+			"curl/8.4.0",
+			"openclaw/",
+			`openclaw/2026.9.2 (linux; ${" ".repeat(256)}x)`,
+		]) {
 			const identity = parseClientIdentity(value);
 			expect(identity.version).toBe("unknown");
 			expect(identity.platform).toBe("unknown");
 		}
 	});
+
+	it.each([512, 8_192, 16_384, 32_768])(
+		"rejects an oversized header with a valid-looking prefix (%i padding)",
+		(padding) => {
+			expect(
+				parseClientIdentity(
+					`openclaw/2026.9.2 (linux; node/v24.0.0; x64; gateway)${" ".repeat(padding)}`,
+				),
+			).toEqual({
+				version: "unknown",
+				platform: "unknown",
+				runtime: "unknown",
+				arch: "unknown",
+				surface: "unknown",
+			});
+		},
+	);
 
 	it("strips characters outside the recorded vocabulary and bounds field length", () => {
 		const identity = parseClientIdentity(
@@ -101,6 +127,64 @@ describe("parseFeatureStats", () => {
 		expect(parsed?.providerFamilies).toEqual(["openai"]);
 		expect(parsed?.pluginsEnabled).toBe(0);
 		expect(parsed?.sessionsLast24h).toBe(0);
+	});
+
+	it.each([" tele gram", "dis!cord", "open ai", "cod ex", "codex\n"])(
+		"drops malformed identifiers instead of repairing %j",
+		(identifier) => {
+			const parsed = parseFeatureStats({
+				schema: 1,
+				features: {
+					channels: [identifier],
+					providerFamilies: [identifier],
+					plugins: [identifier],
+				},
+			});
+			expect(parsed?.channels).toEqual([]);
+			expect(parsed?.providerFamilies).toEqual([]);
+			expect(parsed?.plugins).toEqual([]);
+		},
+	);
+
+	it("rejects overlength tokens without truncating them to another identifier", () => {
+		const valid = "a".repeat(64);
+		expect(
+			parseFeatureStats({
+				schema: 1,
+				features: { plugins: [`${valid}b`, valid] },
+			})?.plugins,
+		).toEqual([valid]);
+		expect(
+			parseFeatureStats({
+				schema: 1,
+				features: { plugins: [`${valid}b`] },
+			})?.plugins,
+		).toEqual([]);
+	});
+
+	it("preserves case-insensitive public names while excluding private and malformed tokens", async () => {
+		const parsed = parseFeatureStats({
+			schema: 1,
+			features: {
+				plugins: ["CODEX", "codex", "Browser", "acme-internal-crm", "cod ex"],
+			},
+		});
+		expect(keepKnownNames(parsed?.plugins ?? [], await loadKnownNames())).toEqual([
+			"browser",
+			"codex",
+		]);
+	});
+
+	it("accepts schema-1 feature reports that predate the optional plugins list", () => {
+		const { plugins, ...features } = body.features;
+		const parsed = parseFeatureStats({ schema: 1, features });
+		expect(parsed).toEqual({
+			...features,
+			channels: ["discord", "telegram"],
+			providerFamilies: ["anthropic", "openai"],
+			plugins: [],
+		});
+		expect(buildDataPoint(parseClientIdentity(null), parsed).doubles).toEqual([1, 7, 14]);
 	});
 });
 

@@ -76,8 +76,10 @@ Missing or unreadable state produces zero; this is not active sessions, messages
 that existed that day.
 
 Unknown keys in a request body are dropped rather than stored, so a future client cannot silently
-widen what this service keeps. Values are length-bounded and character-filtered before they are
-written.
+widen what this service keeps. User-Agents longer than 512 characters become an unknown identity
+before parsing. Identity fields remain length-bounded and character-filtered. Feature IDs must be
+complete identifiers of at most 64 characters; malformed or overlength IDs are dropped, never
+repaired or truncated into another name.
 
 Only **publicly known** plugin, channel, and provider ids are ever named. The client reports names
 only for plugins bundled with OpenClaw, trusted official installs, or entries in its official catalog, and this server

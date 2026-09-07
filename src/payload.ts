@@ -31,6 +31,8 @@ const UNKNOWN = "unknown";
 
 /** Bounded so a hostile client cannot inflate what we store per data point. */
 const MAX_FIELD_LENGTH = 64;
+// Bound matching work before the regex; five stored fields fit within this limit.
+const MAX_USER_AGENT_LENGTH = 512;
 const MAX_LIST_ITEMS = 32;
 const MAX_COUNT = 1_000_000;
 
@@ -43,7 +45,10 @@ function sanitizeField(value: string | undefined): string {
 }
 
 export function parseClientIdentity(userAgent: string | null): ClientIdentity {
-	const match = userAgent?.match(USER_AGENT_PATTERN);
+	const match =
+		userAgent && userAgent.length <= MAX_USER_AGENT_LENGTH
+			? userAgent.match(USER_AGENT_PATTERN)
+			: null;
 	const groups = match?.groups;
 	return {
 		version: sanitizeField(groups?.version),
@@ -56,10 +61,14 @@ export function parseClientIdentity(userAgent: string | null): ClientIdentity {
 
 function sanitizeList(value: unknown): string[] {
 	if (!Array.isArray(value)) return [];
-	const items = value
-		.filter((entry): entry is string => typeof entry === "string")
-		.map((entry) => sanitizeField(entry))
-		.filter((entry) => entry !== UNKNOWN);
+	const items = value.filter(
+		(entry): entry is string =>
+			typeof entry === "string" &&
+			entry.length > 0 &&
+			entry.length <= MAX_FIELD_LENGTH &&
+			!/[^A-Za-z0-9._/-]/u.test(entry) &&
+			entry !== UNKNOWN,
+	);
 	// Sorted + de-duplicated so identical installs produce identical rows.
 	return [...new Set(items)].sort().slice(0, MAX_LIST_ITEMS);
 }

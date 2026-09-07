@@ -4,6 +4,7 @@
 
 **Highlights:** Public update checks and seven-day usage aggregates, with optional feature statistics and no stored install identifiers.
 
+- Bound User-Agent parsing before matching and reject malformed feature IDs without converting them into public names.
 - Aggregate the complete retained public vocabulary without joint-group truncation, fail closed on incomplete query results, and expose fixed windows and query-local report totals and event watermarks. Label public counts as reports and configuration or inventory, preserving the legacy `installs` API alias.
 - Preserve the ten-minute public stats freshness limit on cache hits without resetting their age, and refresh entries when the cache retains them beyond that limit.
 - Generate and retain public plugin, channel, and provider vocabulary from immutable OpenClaw metadata; include bundled plugins and historical catalog names, and canonicalize accepted names before storage.
