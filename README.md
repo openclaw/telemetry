@@ -72,7 +72,9 @@ written.
 
 Only **publicly known** plugin, channel, and provider ids are ever named. The client reports names
 only for plugins bundled with OpenClaw or published in its official catalog, and this server
-independently re-checks every name against those same published catalogs. Privately developed
+independently checks every name against a checked-in vocabulary generated from immutable public
+packaging metadata, provider declarations, and official catalogs. Public vocabulary history is
+retained when names disappear from current catalogs. Privately developed
 plugins are counted in `double2` but never named, because a private plugin id would identify the
 organization running it.
 
@@ -86,10 +88,10 @@ the edge and in validation:
   only bites on floods. Over-limit callers still receive their version answer; they simply stop
   counting, so a busy NAT never loses update checks. The Worker reads the IP transiently for
   this decision and does not write it to Analytics Engine.
-- **Vocabulary allowlisting.** Every reported name is checked against the published OpenClaw
-  catalogs, and versions must match the real release format. Invented values become `unknown`
-  rather than appearing on the public page. If the catalogs cannot be fetched, names are dropped
-  and only counts are recorded — this fails closed rather than publishing unverified text.
+- **Vocabulary allowlisting.** Every reported name is checked against the retained public
+  vocabulary. Accepted names are lowercased, deduplicated, and sorted; unknown names are dropped.
+  Versions must match the release format or become `unknown`. Runtime catalog changes and
+  network outages cannot widen the vocabulary or erase its history.
 - **Public stats caching.** Aggregate responses are cached for ten minutes. Cache misses have a
   separate per-IP limit of 20 requests per minute using the same binding; they do not consume
   recording capacity, and cache hits consume neither counter. Denied misses return `429`
@@ -134,7 +136,7 @@ Use Node.js 24 (the version used in CI) and npm.
 
 ```bash
 npm ci
-npm run check     # typecheck + tests
+npm run check     # vocabulary consistency + typecheck + tests
 npm run dev       # local worker at http://localhost:8787
 npm run deploy    # requires Cloudflare credentials for the OpenClaw account
 ```
@@ -147,6 +149,45 @@ repository secret.
 `/api/stats` additionally needs two Worker secrets — `ACCOUNT_ID` and a read-only
 `ANALYTICS_READ_TOKEN` for the Analytics Engine SQL API. Without them the aggregates endpoint
 returns `503` and everything else keeps working.
+
+### Updating public names
+
+[`data/public-vocabulary.json`](data/public-vocabulary.json) records immutable OpenClaw revisions,
+retained snapshots, and the public source of legacy aliases (`cli`, `claude`, `gemini`).
+[`src/public-vocabulary.ts`](src/public-vocabulary.ts) exports the complete retained `PUBLIC_NAMES`
+for ingestion and stats consumers. Neither file contains names learned from telemetry requests.
+
+Before supporting a new OpenClaw release or catalog revision, use Node.js 24 and a trusted local
+OpenClaw Git repository containing the candidate commit and its history:
+
+```bash
+npm run vocabulary:check -- --source <openclaw-repository> --revision <full-public-commit-sha>
+npm run vocabulary:update -- --source <openclaw-repository> --revision <full-public-commit-sha>
+npm run vocabulary:check -- --source <openclaw-repository>
+npm run check
+```
+
+The first command fails when the candidate is not recorded. Review the generated diff, commit both
+metadata and generated source, and deploy through the normal PR workflow. Do not edit the generated
+names by hand. Plain `npm run vocabulary:check` runs offline in CI and detects metadata/output drift;
+`--source` also reproduces every snapshot from immutable Git objects. It never changes the source
+checkout, runs an install, or uses its uncommitted files.
+
+The generator calls upstream `listBundledPluginPackArtifacts` with the default packaging environment,
+then reads the selected plugin manifests, public provider overlays, and three official catalogs.
+Packaging exclusions remain owned by OpenClaw. A changed upstream metadata contract fails generation
+and needs review rather than silently falling back to a partial vocabulary.
+
+The initial snapshot includes all catalog revisions on the public main history since commit
+`844e781ca40952c98ee997b016e3cc5d2f12f9f3`, before name allowlisting began in August 2026.
+Refreshes append snapshots; never remove older ones during routine updates. This retains removed or
+renamed public entries for the entire seven-day stats window, including names admitted by the older
+moving-catalog implementation. New public names remain rejected until reviewed metadata is deployed.
+The internal allowlist cache namespace changes automatically with vocabulary content.
+
+Historical rows may contain mixed-case names or case-distinct duplicates from older validation.
+This repair canonicalizes new rows only; stats consumers must validate historical coverage and handle
+those rows explicitly rather than assume the stored window is already canonical.
 
 ## License
 
