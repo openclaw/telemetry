@@ -52,6 +52,127 @@ function countingLimiter() {
 	};
 }
 
+describe("GET /api/latest-version", () => {
+	const versionUrl = "https://registry.npmjs.org/openclaw/latest";
+	const upstream = vi.fn<typeof fetch>();
+	const writeDataPoint = vi.fn();
+	let cache: MemoryCache;
+	let env: Env;
+	const invalidBodies = [
+		{ label: "malformed JSON", body: "{" },
+		{ label: "null", body: "null" },
+		{ label: "missing version", body: "{}" },
+		{ label: "non-string version", body: '{"version":42}' },
+		{ label: "empty version", body: '{"version":""}' },
+		{ label: "whitespace version", body: '{"version":" \\n\\t "}' },
+	];
+
+	beforeEach(() => {
+		cache = memoryCache();
+		env = testEnv({ TELEMETRY: { writeDataPoint } });
+		writeDataPoint.mockClear();
+		upstream.mockReset().mockImplementation(async () => Response.json({ version: " 2026.9.2 " }));
+		vi.stubGlobal("caches", { default: cache });
+		vi.stubGlobal("fetch", upstream);
+	});
+
+	afterEach(() => {
+		vi.restoreAllMocks();
+		vi.unstubAllGlobals();
+	});
+
+	it.each([
+		{ operation: "match", failure: "throws" },
+		{ operation: "match", failure: "rejects" },
+		{ operation: "put", failure: "throws" },
+		{ operation: "put", failure: "rejects" },
+	] as const)(
+		"returns the upstream version when cache.$operation $failure",
+		async ({ operation, failure }) => {
+			const spy = vi.spyOn(cache, operation);
+			if (failure === "throws") {
+				spy.mockImplementationOnce(() => {
+					throw new Error("cache unavailable");
+				});
+			} else {
+				spy.mockRejectedValueOnce(new Error("cache unavailable"));
+			}
+			let response: Response;
+			try {
+				response = await worker.fetch(request("/api/latest-version"), env);
+			} finally {
+				expect(writeDataPoint).toHaveBeenCalledTimes(1);
+			}
+			expect(response.status).toBe(200);
+			await expect(response.json()).resolves.toEqual({ version: "2026.9.2" });
+			expect(upstream).toHaveBeenCalledTimes(1);
+		},
+	);
+
+	it.each(invalidBodies)("treats cached $label as a miss", async ({ body }) => {
+		cache.store.set(versionUrl, new Response(body));
+		let response: Response;
+		try {
+			response = await worker.fetch(request("/api/latest-version"), env);
+		} finally {
+			expect(writeDataPoint).toHaveBeenCalledTimes(1);
+		}
+		expect(response.status).toBe(200);
+		await expect(response.json()).resolves.toEqual({ version: "2026.9.2" });
+		expect(upstream).toHaveBeenCalledTimes(1);
+	});
+
+	it("normalizes a valid cache hit without fetching upstream", async () => {
+		cache.store.set(versionUrl, Response.json({ version: " 2026.9.2 " }));
+		const response = await worker.fetch(request("/api/latest-version"), env);
+		expect(response.status).toBe(200);
+		expect(response.headers.get("cache-control")).toBe("public, max-age=300");
+		await expect(response.json()).resolves.toEqual({ version: "2026.9.2" });
+		expect(upstream).not.toHaveBeenCalled();
+		expect(writeDataPoint).toHaveBeenCalledTimes(1);
+	});
+
+	it("caches a valid upstream answer for five minutes and records each request once", async () => {
+		for (let index = 0; index < 2; index++) {
+			const response = await worker.fetch(request("/api/latest-version"), env);
+			expect(response.status).toBe(200);
+			expect(response.headers.get("cache-control")).toBe("public, max-age=300");
+			await expect(response.json()).resolves.toEqual({ version: "2026.9.2" });
+		}
+		expect(cache.store.get(versionUrl)?.headers.get("cache-control")).toBe("public, max-age=300");
+		expect(upstream).toHaveBeenCalledTimes(1);
+		expect(writeDataPoint).toHaveBeenCalledTimes(2);
+	});
+
+	it.each(invalidBodies)("returns 503 for upstream $label without caching it", async ({ body }) => {
+		upstream.mockImplementationOnce(async () => new Response(body));
+		const response = await worker.fetch(request("/api/latest-version"), env);
+		expect(response.status).toBe(503);
+		expect(response.headers.get("cache-control")).toBe("no-store");
+		await expect(response.json()).resolves.toEqual({ error: "version_unavailable" });
+		expect(cache.store.size).toBe(0);
+		expect(writeDataPoint).toHaveBeenCalledTimes(1);
+	});
+
+	it.each(["rejects", "unavailable"] as const)(
+		"returns 503 when upstream %s despite a cache read failure",
+		async (failure) => {
+			vi.spyOn(cache, "match").mockRejectedValueOnce(new Error("cache unavailable"));
+			if (failure === "rejects") upstream.mockRejectedValueOnce(new Error("upstream unavailable"));
+			else upstream.mockImplementationOnce(async () => new Response(null, { status: 503 }));
+			let response: Response;
+			try {
+				response = await worker.fetch(request("/api/latest-version"), env);
+			} finally {
+				expect(writeDataPoint).toHaveBeenCalledTimes(1);
+			}
+			expect(response.status).toBe(503);
+			await expect(response.json()).resolves.toEqual({ error: "version_unavailable" });
+			expect(cache.store.size).toBe(0);
+		},
+	);
+});
+
 describe("GET /api/stats", () => {
 	let sqlCalls: number;
 	let sqlAvailable: boolean;
