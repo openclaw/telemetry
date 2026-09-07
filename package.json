@@ -10,7 +10,9 @@
     "deploy": "wrangler deploy",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "check": "npm run typecheck && npm run test"
+    "check": "npm run vocabulary:check && npm run typecheck && npm run test",
+    "vocabulary:update": "node scripts/public-vocabulary.mjs",
+    "vocabulary:check": "node scripts/public-vocabulary.mjs --check"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260905.1",
