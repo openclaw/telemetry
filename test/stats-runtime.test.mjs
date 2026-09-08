@@ -79,8 +79,9 @@ describe("stats over workerd HTTP", () => {
 		expect(first.headers.get("cache-control")).toBe("public, max-age=600");
 		expect(first.headers.get("access-control-allow-origin")).toBe("*");
 		const body = await first.json();
-		expect(body.versions).toEqual([{ version: "2026.8.2", pings: 4 }]);
-		expect(sqlCalls).toBe(6);
+		expect(body.versions).toEqual([{ version: "2026.8.2", pings: 4, featureReports: 4 }]);
+		expect(body.architectures).toEqual([{ architecture: "arm64", pings: 4, featureReports: 4 }]);
+		expect(sqlCalls).toBe(7);
 
 		const { RATE_LIMIT } = await runtime.getBindings();
 		for (let i = 0; i < 19; i++) {
@@ -90,7 +91,7 @@ describe("stats over workerd HTTP", () => {
 		const warm = await get("/api/stats?ignored=1");
 		expect(warm.status).toBe(200);
 		await expect(warm.json()).resolves.toEqual(body);
-		expect(sqlCalls).toBe(6);
+		expect(sqlCalls).toBe(7);
 
 		const cache = (await runtime.getCaches()).default;
 		expect(await cache.delete("https://telemetry.openclaw.ai/api/stats?cache=reports-v2")).toBe(true);
@@ -98,8 +99,8 @@ describe("stats over workerd HTTP", () => {
 		expect(denied.status).toBe(429);
 		await expect(denied.json()).resolves.toEqual({ error: "rate_limited" });
 		expect(denied.headers.get("cache-control")).toBe("no-store");
-		expect(sqlCalls).toBe(6);
-		console.log("workerd: fill=200 hit=200 same-body=true SQL=6; cold-over-quota=429 additional-SQL=0");
+		expect(sqlCalls).toBe(7);
+		console.log("workerd: fill=200 hit=200 same-body=true SQL=7; cold-over-quota=429 additional-SQL=0");
 	}, 30_000);
 
 	it("does not cache failed SQL responses", async () => {
@@ -110,19 +111,22 @@ describe("stats over workerd HTTP", () => {
 			expect(failed.status).toBe(503);
 			await expect(failed.json()).resolves.toEqual({ error: "stats_unavailable" });
 		}
-		expect(sqlCalls).toBe(12);
+		expect(sqlCalls).toBe(14);
 		sqlAvailable = true;
 		expect((await get()).status).toBe(200);
 		expect((await get()).status).toBe(200);
-		expect(sqlCalls).toBe(18);
-		console.log("workerd: unavailable=503,503 SQL=12; recovery=200 hit=200 total-SQL=18");
+		expect(sqlCalls).toBe(21);
+		console.log("workerd: unavailable=503,503 SQL=14; recovery=200 hit=200 total-SQL=21");
 	}, 30_000);
 
-	it("restores the public TTL while preserving cache age and refreshing expired entries", async () => {
+	it("preserves old cached payloads and their age, then refreshes expired entries to the additive contract", async () => {
 		await start();
 		const first = await get();
 		expect(first.status).toBe(200);
-		const body = await first.text();
+		const previous = await first.json();
+		delete previous.architectures;
+		for (const row of [...previous.versions, ...previous.platforms]) delete row.featureReports;
+		const body = JSON.stringify(previous);
 		const cache = (await runtime.getCaches()).default;
 		const key = "https://telemetry.openclaw.ai/api/stats?cache=reports-v2";
 		const putAged = (age) => cache.put(key, new RuntimeResponse(body, {
@@ -142,15 +146,19 @@ describe("stats over workerd HTTP", () => {
 		expect(Number(warm.headers.get("age"))).toBeLessThan(600);
 		expect(warm.headers.get("access-control-allow-origin")).toBe("*");
 		await expect(warm.text()).resolves.toBe(body);
-		expect(sqlCalls).toBe(6);
+		expect(sqlCalls).toBe(7);
 
 		await putAged(600);
 		const refreshed = await get();
 		expect(refreshed.status).toBe(200);
 		expect(refreshed.headers.get("cache-control")).toBe("public, max-age=600");
 		expect(refreshed.headers.get("age")).toBeNull();
-		expect(sqlCalls).toBe(12);
-		console.log("workerd: widened cache TTL restored to 600; Age>=590/body preserved; Age=600 refresh adds SQL=6");
+		await expect(refreshed.json()).resolves.toMatchObject({
+			versions: [{ version: "2026.8.2", pings: 4, featureReports: 4 }],
+			architectures: [{ architecture: "arm64", pings: 4, featureReports: 4 }],
+		});
+		expect(sqlCalls).toBe(14);
+		console.log("workerd: old cache body/Age preserved with TTL=600; Age=600 refresh adds SQL=7 and cohort fields");
 	}, 30_000);
 
 	it("keeps recording and stats-miss quotas independent in both directions", async () => {
@@ -167,7 +175,7 @@ describe("stats over workerd HTTP", () => {
 			expect((await get("/api/stats", "198.51.100.9")).status).toBe(503);
 		}
 		expect((await get("/api/stats", "198.51.100.9")).status).toBe(429);
-		expect(sqlCalls).toBe(126);
+		expect(sqlCalls).toBe(147);
 		expect((await get("/api/latest-version", "198.51.100.9")).status).toBe(200);
 		const { RATE_LIMIT } = await runtime.getBindings();
 		for (let i = 0; i < 19; i++) {
