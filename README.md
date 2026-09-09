@@ -55,6 +55,24 @@ do not opt in automatically. The enabled setting, not a recorded prompt response
 The server limits feature-statistics bodies to 16 KiB while reading the upload. Oversized or
 malformed bodies are discarded, and the request still receives its version answer.
 
+### Optional runtime UTC-offset bucket
+
+The schema-1 receiver also accepts `features.runtimeUtcOffsetBucket`. Its purpose is to help
+investigate clock-dependent runtime compatibility across coarse offset groups, not locate a
+person. A process clock setting can differ from the operator's location.
+
+The planned client contract requires both feature-statistics consent and a **separate, default-off
+UTC-offset opt-in** before including this field. This receiver change does not release that client
+setting or enable collection on existing clients. Only these exact strings are accepted:
+`neg_12_6`, `neg_6_0`, `utc_0`, `pos_0_6`, `pos_6_12`, `pos_12_14`, and `unknown`.
+The receiver does not accept IANA time-zone names or raw numeric offsets, and does not repair
+case or whitespace. An invalid value drops only this field; valid sibling feature fields survive.
+Explicit `unknown` is a valid value, not evidence of operator consent.
+
+Older clients may omit the field. Older receivers follow the existing unknown-key-drop contract:
+they ignore this addition while retaining recognized feature fields. The schema marker and
+existing payload example above are unchanged.
+
 ## What is stored
 
 One Analytics Engine row per request, with these columns and no others:
@@ -69,6 +87,7 @@ One Analytics Engine row per request, with these columns and no others:
 | `blob6` | Configured, not explicitly disabled public channel IDs, comma-joined |
 | `blob7` | Public provider IDs from configuration, auth profiles, and model references, comma-joined |
 | `blob8` | Public plugin IDs from enabled inventory, comma-joined |
+| `blob9` | Optional coarse runtime UTC-offset bucket; empty string when absent or invalid |
 | `double1` | `1` if the request included feature stats, else `0` |
 | `double2` | Total enabled plugin count, including plugins not named above |
 | `double3` | Retained session-creation events timestamped within the preceding 24 hours |
@@ -85,6 +104,13 @@ widen what this service keeps. User-Agents longer than 512 characters become an 
 before parsing. Identity fields remain length-bounded and character-filtered. Feature IDs must be
 complete identifiers of at most 64 characters; malformed or overlength IDs are dropped, never
 repaired or truncated into another name.
+
+The offset bucket is co-located with the existing identity and feature columns in the same
+Analytics Engine row and dataset, not stored separately. Analytics Engine retains data for
+**three months** under its [published limits](https://developers.cloudflare.com/analytics/analytics-engine/limits/).
+The appended ninth blob remains within the limits of twenty blobs, twenty doubles, one index,
+and 16 KB of blob data per point. Existing column positions and the version sampling key are
+unchanged. No offset field is added to public stats or the homepage.
 
 Only **publicly known** plugin, channel, and provider ids are ever named. The client reports names
 only for plugins bundled with OpenClaw, trusted official installs, or entries in its official catalog, and this server
@@ -158,6 +184,7 @@ get attention, not billing or security decisions.
 - Credentials, tokens, or secret references
 - IP addresses, hostnames, usernames, or account identifiers
 - Any install ID or device ID
+- IANA time-zone names, raw numeric UTC offsets, or physical-device hardware details
 
 These Analytics Engine rows contain no install or device identifier, so the service does not
 maintain per-install histories or retention curves.
@@ -178,6 +205,10 @@ Cloudflare's separate infrastructure-level processing.
 
 `OPENCLAW_NO_AUTO_UPDATE=1` also prevents automatic update requests. A truthy `CI` suppresses both
 tiers unless a replacement `OPENCLAW_TELEMETRY_ENDPOINT` is explicitly configured.
+
+Under the planned client contract, turning off either feature statistics or the separate offset
+opt-in stops new offset collection. It does not erase previously recorded rows; the same
+three-month Analytics Engine retention applies. This receiver change adds no backup or export job.
 
 `openclaw telemetry show` displays policy and a CLI-built payload preview, not the exact next Gateway
 payload: registry state, configuration, and collection time can differ. When policy suppresses requests,

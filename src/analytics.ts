@@ -26,6 +26,7 @@ export function buildDataPoint(identity: ClientIdentity, features: FeatureStats 
 			features?.channels.join(LIST_SEPARATOR) ?? "",
 			features?.providerFamilies.join(LIST_SEPARATOR) ?? "",
 			features?.plugins.join(LIST_SEPARATOR) ?? "",
+			features?.runtimeUtcOffsetBucket ?? "",
 		],
 		doubles: [
 			features ? 1 : 0,

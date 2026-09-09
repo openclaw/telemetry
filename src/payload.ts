@@ -21,6 +21,7 @@ export type FeatureStats = {
 	plugins: string[];
 	pluginsEnabled: number;
 	sessionsLast24h: number;
+	runtimeUtcOffsetBucket?: (typeof RUNTIME_UTC_OFFSET_BUCKETS)[number];
 };
 
 /** `openclaw/2026.8.2 (darwin; node/v26.0.1; arm64; gateway)` */
@@ -28,6 +29,15 @@ const USER_AGENT_PATTERN =
 	/^openclaw\/(?<version>[^\s(]+)\s+\((?<platform>[^;)]+);\s*(?<runtime>[^;)]+);\s*(?<arch>[^;)]+)(?:;\s*(?<surface>[^;)]+))?\)/u;
 
 const UNKNOWN = "unknown";
+const RUNTIME_UTC_OFFSET_BUCKETS = [
+	"neg_12_6",
+	"neg_6_0",
+	"utc_0",
+	"pos_0_6",
+	"pos_6_12",
+	"pos_12_14",
+	"unknown",
+] as const;
 
 /** Bounded so a hostile client cannot inflate what we store per data point. */
 const MAX_FIELD_LENGTH = 64;
@@ -83,7 +93,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Projects an untrusted body down to the four fields we publish. Unknown keys
+ * Projects an untrusted body down to the documented fields. Unknown keys
  * are dropped on the floor: if a future client sends more, this service keeps
  * storing only what its README promises until it is deliberately updated.
  */
@@ -92,11 +102,15 @@ export function parseFeatureStats(body: unknown): FeatureStats | undefined {
 	if (body.schema !== 1) return undefined;
 	const features = isRecord(body.features) ? body.features : undefined;
 	if (!features) return undefined;
+	const runtimeUtcOffsetBucket = RUNTIME_UTC_OFFSET_BUCKETS.find(
+		(bucket) => bucket === features.runtimeUtcOffsetBucket,
+	);
 	return {
 		channels: sanitizeList(features.channels),
 		providerFamilies: sanitizeList(features.providerFamilies),
 		plugins: sanitizeList(features.plugins),
 		pluginsEnabled: sanitizeCount(features.pluginsEnabled),
 		sessionsLast24h: sanitizeCount(features.sessionsLast24h),
+		...(runtimeUtcOffsetBucket ? { runtimeUtcOffsetBucket } : {}),
 	};
 }

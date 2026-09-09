@@ -52,7 +52,7 @@ function countingLimiter() {
 	};
 }
 
-describe("GET /api/latest-version", () => {
+describe("GET | POST /api/latest-version", () => {
 	const versionUrl = "https://registry.npmjs.org/openclaw/latest";
 	const upstream = vi.fn<typeof fetch>();
 	const writeDataPoint = vi.fn();
@@ -79,6 +79,57 @@ describe("GET /api/latest-version", () => {
 	afterEach(() => {
 		vi.restoreAllMocks();
 		vi.unstubAllGlobals();
+	});
+
+	it.each([
+		{ label: "valid", bucket: "pos_6_12", stored: "pos_6_12" },
+		{ label: "absent", bucket: undefined, stored: "" },
+		{ label: "invalid", bucket: "Asia/Singapore", stored: "" },
+	])("records a $label UTC-offset bucket without changing the version response", async ({ bucket, stored }) => {
+		const response = await worker.fetch(new Request("https://telemetry.example/api/latest-version", {
+			method: "POST",
+			headers: {
+				"content-type": "application/json",
+				"user-agent": "openclaw/2026.9.2 (linux; node/v24.0.0; x64; gateway)",
+			},
+			body: JSON.stringify({
+				schema: 1,
+				features: {
+					channels: ["DISCORD", "private-channel"],
+					providerFamilies: ["OPENAI", "private-provider"],
+					plugins: ["CODEX", "private-plugin"],
+					pluginsEnabled: 7,
+					sessionsLast24h: 14,
+					...(bucket === undefined ? {} : { runtimeUtcOffsetBucket: bucket }),
+				},
+			}),
+		}), env);
+		expect(response.status).toBe(200);
+		expect(response.headers.get("cache-control")).toBe("public, max-age=300");
+		await expect(response.json()).resolves.toEqual({ version: "2026.9.2" });
+		expect(upstream).toHaveBeenCalledTimes(1);
+		expect(writeDataPoint).toHaveBeenCalledTimes(1);
+		expect(writeDataPoint).toHaveBeenCalledWith({
+			indexes: ["2026.9.2"],
+			blobs: [
+				"2026.9.2", "linux", "x64", "node/v24.0.0", "gateway",
+				"discord", "openai", "codex", stored,
+			],
+			doubles: [1, 7, 14],
+		});
+	});
+
+	it("records an update-only request with an empty offset column", async () => {
+		const response = await worker.fetch(new Request("https://telemetry.example/api/latest-version", {
+			headers: { "user-agent": "openclaw/2026.9.2 (linux; node/v24.0.0; x64; gateway)" },
+		}), env);
+		await expect(response.json()).resolves.toEqual({ version: "2026.9.2" });
+		expect(writeDataPoint).toHaveBeenCalledTimes(1);
+		expect(writeDataPoint).toHaveBeenCalledWith({
+			indexes: ["2026.9.2"],
+			blobs: ["2026.9.2", "linux", "x64", "node/v24.0.0", "gateway", "", "", "", ""],
+			doubles: [0, 0, 0],
+		});
 	});
 
 	it.each([

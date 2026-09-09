@@ -78,15 +78,47 @@ describe("parseFeatureStats", () => {
 			sessionsLast24h: 14,
 		},
 	};
+	const expectedFeatures = {
+		channels: ["discord", "telegram"],
+		providerFamilies: ["anthropic", "openai"],
+		plugins: ["acpx", "codex"],
+		pluginsEnabled: 7,
+		sessionsLast24h: 14,
+	};
 
 	it("accepts a documented payload and sorts lists for stable rows", () => {
-		expect(parseFeatureStats(body)).toEqual({
-			channels: ["discord", "telegram"],
-			providerFamilies: ["anthropic", "openai"],
-			plugins: ["acpx", "codex"],
-			pluginsEnabled: 7,
-			sessionsLast24h: 14,
+		expect(parseFeatureStats(body)).toEqual(expectedFeatures);
+	});
+
+	it.each([
+		"neg_12_6",
+		"neg_6_0",
+		"utc_0",
+		"pos_0_6",
+		"pos_6_12",
+		"pos_12_14",
+		"unknown",
+	])("accepts the exact UTC-offset bucket %s without changing sibling fields", (bucket) => {
+		expect(parseFeatureStats({
+			...body,
+			features: { ...body.features, runtimeUtcOffsetBucket: bucket },
+		})).toEqual({
+			...expectedFeatures,
+			runtimeUtcOffsetBucket: bucket,
 		});
+	});
+
+	it.each([
+		null, true, false, 0, -480, 330, {}, [], ["utc_0"], "",
+		"UTC_0", " utc_0", "utc_0 ", "utc_0\n", "unknown ",
+		"Asia/Singapore", "UTC+08:00", "+08:00", "480", "other",
+	].map((value) => ({ value })))("drops invalid UTC-offset bucket $value only", ({ value }) => {
+		const parsed = parseFeatureStats({
+			...body,
+			features: { ...body.features, runtimeUtcOffsetBucket: value },
+		});
+		expect(parsed).toEqual(expectedFeatures);
+		expect(parsed).not.toHaveProperty("runtimeUtcOffsetBucket");
 	});
 
 	it("rejects bodies without the current schema marker", () => {
@@ -203,11 +235,12 @@ describe("buildDataPoint", () => {
 			"",
 			"",
 			"",
+			"",
 		]);
 		expect(point.doubles).toEqual([0, 0, 0]);
 	});
 
-	it("records opted-in feature stats in the documented column order", () => {
+	it.each([undefined, "utc_0"])("records feature stats with bucket %s in the documented column order", (bucket) => {
 		const features = parseFeatureStats({
 			schema: 1,
 			features: {
@@ -216,13 +249,17 @@ describe("buildDataPoint", () => {
 				plugins: ["codex"],
 				pluginsEnabled: 7,
 				sessionsLast24h: 14,
+				runtimeUtcOffsetBucket: bucket,
 			},
 		});
-		const point = buildDataPoint(identity, features);
-		expect(point.blobs[5]).toBe("discord,telegram");
-		expect(point.blobs[6]).toBe("anthropic");
-		expect(point.blobs[7]).toBe("codex");
-		expect(point.doubles).toEqual([1, 7, 14]);
+		expect(buildDataPoint(identity, features)).toEqual({
+			indexes: ["2026.8.2"],
+			blobs: [
+				"2026.8.2", "darwin", "arm64", "node/v26.0.1", "gateway",
+				"discord,telegram", "anthropic", "codex", bucket ?? "",
+			],
+			doubles: [1, 7, 14],
+		});
 	});
 
 	it("never writes an identifier column that could link two pings", () => {
@@ -230,7 +267,7 @@ describe("buildDataPoint", () => {
 		for (const forbidden of ["id", "uuid", "ip", "host", "user"]) {
 			expect(serialized.toLowerCase()).not.toContain(`"${forbidden}"`);
 		}
-		expect(countRecordedColumns(buildDataPoint(identity, undefined))).toBe(12);
+		expect(countRecordedColumns(buildDataPoint(identity, undefined))).toBe(13);
 	});
 });
 
