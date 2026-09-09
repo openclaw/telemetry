@@ -4,6 +4,7 @@
 
 **Highlights:** Public update checks and seven-day usage aggregates, with optional feature statistics and no stored install identifiers.
 
+- Add a bounded, manual Worker-health CLI with hourly adaptive request and error estimates, strict incomplete-data handling, and an operator runbook. No client collection or Worker runtime settings change.
 - Add offline, manifest-bound npm comparison tooling with matched UTC windows, captured feed cutoffs, anomaly checks, exclusion sensitivity, and separate undated version totals. Download events are never converted to installations or users.
 - Preserve successful update responses when the version cache fails, and validate cached versions with the same nonempty-string rules as npm responses.
 - Bound User-Agent parsing before matching and reject malformed feature IDs without converting them into public names.

@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit",
     "check": "npm run vocabulary:check && npm run typecheck && npm run test",
     "npm:quality": "node scripts/npm-quality.mjs",
+    "worker:health": "node scripts/worker-health.mjs",
     "vocabulary:update": "node scripts/public-vocabulary.mjs",
     "vocabulary:check": "node scripts/public-vocabulary.mjs --check"
   },
