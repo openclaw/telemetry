@@ -1,6 +1,7 @@
 export type StatsEvent = {
 	version: string;
 	platform: string;
+	architecture: string;
 	channels: string;
 	providers: string;
 	plugins: string;
@@ -12,6 +13,7 @@ export type StatsEvent = {
 export const SAMPLE_EVENTS: StatsEvent[] = [{
 	version: "2026.8.2",
 	platform: "darwin",
+	architecture: "arm64",
 	channels: "telegram",
 	providers: "anthropic",
 	plugins: "codex",
@@ -41,12 +43,25 @@ export function fixtureRows(sql: string, events: StatsEvent[] = [{
 			latestFeatureEventAt: latest(features),
 		}];
 	}
-	const column = sql.includes("AS version") ? "version" : sql.includes("AS platform") ? "platform" : undefined;
+	const column = sql.includes("AS version") ? "version" :
+		sql.includes("AS platform") ? "platform" : sql.includes("AS architecture") ? "architecture" : undefined;
 	if (column) {
-		const totals = new Map<string, number>();
-		for (const event of events) totals.set(event[column], (totals.get(event[column]) ?? 0) + event.weight);
-		return [...totals].sort((a, b) => b[1] - a[1]).slice(0, 25)
-			.map(([name, pings]) => ({ [column]: name, pings: String(pings) }));
+		const totals = new Map<string, { pings: number; featureReports: number }>();
+		for (const event of events) {
+			let name = event[column];
+			if (column === "architecture") {
+				if (!name || name === "unknown") name = "unknown";
+				else if (!["arm64", "x64", "arm"].includes(name)) name = "other";
+			}
+			const group = totals.get(name) ?? { pings: 0, featureReports: 0 };
+			group.pings += event.weight;
+			if (event.feature) group.featureReports += event.weight;
+			totals.set(name, group);
+		}
+		return [...totals].sort((a, b) => b[1].pings - a[1].pings).slice(0, column === "architecture" ? 6 : 25)
+			.map(([name, counts]) => ({
+				[column]: name, pings: String(counts.pings), featureReports: String(counts.featureReports),
+			}));
 	}
 	if (sql.includes("GROUP BY channels, providers, plugins")) {
 		const groups = new Map<string, { channels: string; providers: string; plugins: string; pings: number }>();
