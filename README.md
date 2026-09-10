@@ -52,19 +52,19 @@ carries a small JSON body:
 
 Interactive setup defaults to **No thanks**; guided Quick Start skips that prompt. Scripted installs
 do not opt in automatically. The enabled setting, not a recorded prompt response, controls inclusion.
-The server limits feature-statistics bodies to 16 KiB while reading the upload. Oversized or
-malformed bodies are discarded, and the request still receives its version answer.
+The server limits bodies containing anonymous feature statistics to 16 KiB while reading
+the upload. Oversized or malformed bodies are discarded, and the request still receives its
+version answer.
 
 <a id="cloudflare-derived-request-geography"></a>
 
 ### Approximate location
 
-Cloudflare provides approximate location information, such as **country and city**, plus
-**region code and timezone**. No raw IP addresses or precise location coordinates are stored
-in our analytics.
+Cloudflare provides approximate location: country, region code, city, and timezone.
+We store no raw IP addresses or precise coordinates in analytics.
 
-Recorded update-only requests also include these fields when feature statistics are off or
-`DO_NOT_TRACK` is set. No additional client payload or prompt is needed.
+Recorded update checks include these fields even when anonymous feature statistics are off
+or `DO_NOT_TRACK` is set. No additional client payload or prompt is needed.
 
 The receiver uses only those four fields from
 [`request.cf`](https://developers.cloudflare.com/workers/runtime-apis/request/), not from
@@ -89,7 +89,7 @@ Each recorded request contributes one Analytics Engine data point with these col
 | `blob10` | Country-scoped region code |
 | `blob11` | Approximate city |
 | `blob12` | Named timezone |
-| `double1` | `1` if the request included feature stats, else `0` |
+| `double1` | `1` if the request included anonymous feature statistics, else `0` |
 | `double2` | Total enabled plugin count, including plugins not named above |
 | `double3` | Retained session-creation events timestamped within the preceding 24 hours |
 
@@ -215,7 +215,7 @@ processing is outside those settings.
 
 | Command or setting | Effect |
 | --- | --- |
-| `openclaw telemetry off` | Stops the feature-stats body. Update checks continue. |
+| `openclaw telemetry off` | Stops anonymous feature statistics. Update checks continue. |
 | `DO_NOT_TRACK=1` | Same, enforced from the environment. |
 | `update.checkOnStart: false` | Stops both tiers of automatic update requests. Explicit update commands and other configured services are separate. |
 

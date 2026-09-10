@@ -71,8 +71,8 @@ footer { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--line
 <p>Channels and providers describe configuration; plugins describe enabled inventory, not invocations. <code>sessionsLast24h</code> counts retained session-creation events timestamped in the preceding 24 hours, not active sessions or messages. Missing or unreadable local state produces zero.</p>
 
 <h2>Approximate location</h2>
-<p>Cloudflare provides approximate location information, such as country and city, plus region code and timezone. No raw IP addresses or precise location coordinates are stored in our analytics.</p>
-<p>Recorded update-only requests also include these fields when feature statistics are off or <code>DO_NOT_TRACK</code> is set. Missing or invalid fields are left empty. Records are retained for three months; the public aggregates below do not expose location information.</p>
+<p>Cloudflare provides approximate location: country, region code, city, and timezone. We store no raw IP addresses or precise coordinates in analytics.</p>
+<p>Recorded update checks include these fields even when anonymous feature statistics are off or <code>DO_NOT_TRACK</code> is set. Missing or invalid fields stay empty. Records are retained for three months. Public aggregates exclude location information.</p>
 
 <h2>What we exclude from Analytics Engine</h2>
 <ul class="never">
@@ -87,7 +87,7 @@ footer { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--line
 <h2>How to turn it off</h2>
 <table>
 <tr><th>Command or setting</th><th>Effect</th></tr>
-<tr><td><code>openclaw telemetry off</code></td><td>Stops the feature-stats body. Update checks continue.</td></tr>
+<tr><td><code>openclaw telemetry off</code></td><td>Stops anonymous feature statistics. Update checks continue.</td></tr>
 <tr><td><code>DO_NOT_TRACK=1</code></td><td>Same, enforced from the environment.</td></tr>
 <tr><td><code>update.checkOnStart: false</code></td><td>Stops both tiers of automatic update requests. Explicit updates and other configured services are separate.</td></tr>
 </table>
@@ -178,7 +178,7 @@ Docs: <a href="https://docs.openclaw.ai/gateway/telemetry">docs.openclaw.ai/gate
     document.getElementById("stats-window").textContent =
       "Window: " + date(data.windowStart) + " (inclusive) to " + date(data.windowEnd) + " (exclusive).";
     document.getElementById("stats-totals").textContent =
-      data.summary.totalPings.toLocaleString() + " update reports; " + data.summary.featureReports.toLocaleString() + " with feature statistics in the summary sample.";
+      data.summary.totalPings.toLocaleString() + " update reports; " + data.summary.featureReports.toLocaleString() + " with anonymous feature statistics in the summary sample.";
     document.getElementById("stats-watermarks").textContent =
       "Latest recorded event: " + date(data.summary.latestEventAt) + ". Latest feature event: " + date(data.summary.latestFeatureEventAt) + ".";
     document.getElementById("stats-generated").textContent =
