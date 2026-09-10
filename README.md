@@ -1,7 +1,7 @@
 # OpenClaw telemetry
 
 The Cloudflare Worker behind [telemetry.openclaw.ai](https://telemetry.openclaw.ai). It answers the
-daily update check that OpenClaw installs make, and records request metadata for aggregate analysis.
+daily update check that OpenClaw installs make and provides anonymous usage aggregates.
 
 This repository is public because that is the whole point: you should not have to take our word for
 what the server keeps. [`src/analytics.ts`](src/analytics.ts) defines the Analytics Engine row
@@ -29,7 +29,7 @@ and cache write failures do not discard a valid npm response. Both sources must 
 version string, which is trimmed before returning it. If npm is unavailable and there is no valid
 cached version, the endpoint returns `503 version_unavailable`.
 
-Feature statistics are **off by default**. Operators can enable them during interactive setup,
+Anonymous feature statistics are **off by default**. Operators can enable them during interactive setup,
 with `openclaw telemetry on`, or with `telemetry.enabled: true`. When enabled, the same request
 carries a small JSON body:
 
@@ -55,37 +55,21 @@ do not opt in automatically. The enabled setting, not a recorded prompt response
 The server limits feature-statistics bodies to 16 KiB while reading the upload. Oversized or
 malformed bodies are discarded, and the request still receives its version answer.
 
-### Cloudflare-derived request geography
+<a id="cloudflare-derived-request-geography"></a>
 
-Cloudflare processes the connection IP address and provides approximate request-origin
-**country, region code, city, and timezone** in
-[`request.cf`](https://developers.cloudflare.com/workers/runtime-apis/request/).
-The receiver records only `country`, `regionCode`, `city`, and `timezone` from that metadata.
-It never takes geography from client-supplied headers or bodies, and does not copy the full `cf`
-object. These fields can describe a proxy, VPN exit, or remote server rather than a person.
-They are not the operator's locale or the OpenClaw runtime's clock setting.
+### Approximate location
 
-Geography is baseline metadata on recorded update requests, including update-only `GET` requests
-when feature statistics are off or `DO_NOT_TRACK` is set. It requires no additional client
-payload or prompt. Existing request-suppression settings still prevent automatic update requests.
+Cloudflare provides approximate location information, such as **country and city**, plus
+**region code and timezone**. No raw IP addresses or precise location coordinates are stored
+in our analytics.
 
-[`src/geography.ts`](src/geography.ts) bounds and validates each field independently:
+Recorded update-only requests also include these fields when feature statistics are off or
+`DO_NOT_TRACK` is set. No additional client payload or prompt is needed.
 
-- Country must be two ASCII letters, normalized to uppercase. Missing, malformed, `XX`
-  (unknown), and `T1` (Tor) values are stored as empty strings; no country is inferred.
-- Region is the country-scoped ISO 3166-2 subdivision component, not a region name.
-  It must be one to three uppercase ASCII letters or digits, with leading zeros preserved.
-  It is empty when country is absent or invalid; `cf.region` is not a fallback.
-- City preserves Unicode, trims surrounding whitespace, and normalizes to NFC. Inputs longer
-  than 128 UTF-16 code units are rejected before normalization; normalized values must fit
-  128 UTF-8 bytes. Controls, invisible formatting characters, line separators, and unpaired
-  surrogates are rejected. Names are never transliterated or truncated into different names.
-- Timezone must be a named identifier of at most 64 ASCII bytes accepted by the Worker's
-  `Intl.DateTimeFormat`. Valid aliases such as `UTC` and `Etc/GMT+5` are preserved.
-  Raw numeric offsets are rejected.
-
-Absent or invalid fields are empty strings and do not discard valid siblings or feature statistics.
-Invalid feature bodies still permit baseline metadata recording and a version response.
+The receiver uses only those four fields from
+[`request.cf`](https://developers.cloudflare.com/workers/runtime-apis/request/), not from
+client-supplied headers or bodies. [`src/geography.ts`](src/geography.ts) bounds and validates
+each field; missing or invalid values are left empty without discarding valid fields.
 
 ## What is stored
 
@@ -101,10 +85,10 @@ Each recorded request contributes one Analytics Engine data point with these col
 | `blob6` | Configured, not explicitly disabled public channel IDs, comma-joined |
 | `blob7` | Public provider IDs from configuration, auth profiles, and model references, comma-joined |
 | `blob8` | Public plugin IDs from enabled inventory, comma-joined |
-| `blob9` | Cloudflare-derived request-origin country |
-| `blob10` | Cloudflare-derived country-scoped region code |
-| `blob11` | Cloudflare-derived city |
-| `blob12` | Cloudflare-derived named timezone |
+| `blob9` | Approximate country |
+| `blob10` | Country-scoped region code |
+| `blob11` | Approximate city |
+| `blob12` | Named timezone |
 | `double1` | `1` if the request included feature stats, else `0` |
 | `double2` | Total enabled plugin count, including plugins not named above |
 | `double3` | Retained session-creation events timestamped within the preceding 24 hours |
@@ -220,21 +204,18 @@ get attention, not billing or security decisions.
 
 These Analytics Engine rows contain no direct user, account, install, or device identifier.
 Reports are not unique installations or users, and the service does not maintain per-install
-histories or retention curves. The stored combination of request metadata and derived geography
-is not a guarantee of anonymity.
+histories or retention curves.
 
-Cloudflare handles TLS and network requests and processes client IP addresses to derive geography.
-The Worker reads
-`cf-connecting-ip` transiently and passes it to Cloudflare's rate-limiting binding; it does not
-write that IP to Analytics Engine. Worker observability, logs, and invocation logs are explicitly
-disabled in [`wrangler.jsonc`](wrangler.jsonc). These settings do not describe or control
-Cloudflare's separate infrastructure-level processing.
+Cloudflare processes connection IP addresses, and the Worker uses them transiently for rate
+limiting without storing them in Analytics Engine. Worker observability, logs, and invocation
+logs are disabled in [`wrangler.jsonc`](wrangler.jsonc). Cloudflare's separate infrastructure
+processing is outside those settings.
 
 ## Turning it off
 
 | Command or setting | Effect |
 | --- | --- |
-| `openclaw telemetry off` | Stops the feature-stats body. Update checks and baseline request geography continue. |
+| `openclaw telemetry off` | Stops the feature-stats body. Update checks continue. |
 | `DO_NOT_TRACK=1` | Same, enforced from the environment. |
 | `update.checkOnStart: false` | Stops both tiers of automatic update requests. Explicit update commands and other configured services are separate. |
 
@@ -246,7 +227,7 @@ The same three-month Analytics Engine retention applies. This receiver adds no b
 
 `openclaw telemetry show` displays policy and a CLI-built payload preview, not the exact next Gateway
 payload: registry state, configuration, and collection time can differ. It cannot preview
-Cloudflare-derived receiver metadata. When policy suppresses requests,
+server-derived location information. When policy suppresses requests,
 it shows `Request: none` (`request: null` in JSON). Client-side
 documentation lives at [docs.openclaw.ai/gateway/telemetry](https://docs.openclaw.ai/gateway/telemetry).
 

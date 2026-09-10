@@ -47,12 +47,12 @@ footer { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--line
 <body>
 <main>
 <h1>OpenClaw telemetry</h1>
-<p class="lede">This service answers the daily update check that OpenClaw installs make, and records request metadata for aggregate analysis. Everything it does is in <a href="https://github.com/openclaw/telemetry">this repository</a>.</p>
+<p class="lede">This service answers the daily update check that OpenClaw installs make and provides anonymous usage aggregates. Everything it does is in <a href="https://github.com/openclaw/telemetry">this repository</a>.</p>
 
 <h2>What an install sends</h2>
 <p>With automatic update checks enabled, a successful version check is reused for 24 hours. The request carries a User-Agent:</p>
 <pre><code>openclaw/2026.8.2 (darwin; node/v26.0.1; arm64; gateway)</code></pre>
-<p>Feature statistics are off by default. Operators can enable them during interactive setup, with <code>openclaw telemetry on</code>, or with <code>telemetry.enabled: true</code>. When enabled, the same request carries a small body of feature facts:</p>
+<p>Anonymous feature statistics are off by default. Operators can enable them during interactive setup, with <code>openclaw telemetry on</code>, or with <code>telemetry.enabled: true</code>. When enabled, the same request carries a small body of feature facts:</p>
 <pre><code>{
   "schema": 1,
   "version": "2026.8.2",
@@ -70,9 +70,9 @@ footer { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--line
 <p>Interactive setup defaults to <strong>No thanks</strong>; guided Quick Start skips the question. Scripted installs do not opt in automatically. The enabled setting controls inclusion, not whether a prompt was answered.</p>
 <p>Channels and providers describe configuration; plugins describe enabled inventory, not invocations. <code>sessionsLast24h</code> counts retained session-creation events timestamped in the preceding 24 hours, not active sessions or messages. Missing or unreadable local state produces zero.</p>
 
-<h2>Cloudflare-derived request geography</h2>
-<p>Cloudflare processes connection IP addresses and provides approximate request-origin country, region code, city, and timezone. The Worker records those four derived fields alongside request metadata in Analytics Engine, including on update-only requests when feature statistics are off or <code>DO_NOT_TRACK</code> is set. No additional client payload or prompt is involved.</p>
-<p>Geography may describe a proxy, VPN exit, or remote server, not a person's location or the runtime's clock. Missing or invalid fields are left empty. Records have the same three-month retention; the public aggregates below do not expose geography. Derived geography and other request metadata are not a guarantee of anonymity.</p>
+<h2>Approximate location</h2>
+<p>Cloudflare provides approximate location information, such as country and city, plus region code and timezone. No raw IP addresses or precise location coordinates are stored in our analytics.</p>
+<p>Recorded update-only requests also include these fields when feature statistics are off or <code>DO_NOT_TRACK</code> is set. Missing or invalid fields are left empty. Records are retained for three months; the public aggregates below do not expose location information.</p>
 
 <h2>What we exclude from Analytics Engine</h2>
 <ul class="never">
@@ -82,18 +82,17 @@ footer { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--line
 <li>Any install ID or device ID</li>
 <li>Coordinates, postal codes, or physical-device hardware details</li>
 </ul>
-<p>The Worker reads the client IP transiently for Cloudflare's rate limiter, but does not write it to Analytics Engine. Worker observability, logs, and invocation logs are disabled in the deployment configuration.</p>
-<p>Cloudflare handles TLS and network requests and sees client IP addresses. Its separate infrastructure-level processing is not described or controlled by these Worker logging settings.</p>
+<p>Reports contain no user, account, install, or device identifier. Cloudflare processes connection IP addresses, and the Worker uses them transiently for rate limiting without storing them in Analytics Engine. Worker logs are disabled; Cloudflare's separate infrastructure processing is outside those settings.</p>
 
 <h2>How to turn it off</h2>
 <table>
 <tr><th>Command or setting</th><th>Effect</th></tr>
-<tr><td><code>openclaw telemetry off</code></td><td>Stops the feature-stats body. Update checks and baseline request geography continue.</td></tr>
+<tr><td><code>openclaw telemetry off</code></td><td>Stops the feature-stats body. Update checks continue.</td></tr>
 <tr><td><code>DO_NOT_TRACK=1</code></td><td>Same, enforced from the environment.</td></tr>
 <tr><td><code>update.checkOnStart: false</code></td><td>Stops both tiers of automatic update requests. Explicit updates and other configured services are separate.</td></tr>
 </table>
 <p><code>OPENCLAW_NO_AUTO_UPDATE=1</code> also prevents automatic update requests. A truthy <code>CI</code> suppresses both tiers unless a replacement <code>OPENCLAW_TELEMETRY_ENDPOINT</code> is explicitly configured.</p>
-<p><code>openclaw telemetry show</code> displays policy and a CLI-built payload preview, not the exact next Gateway payload or Cloudflare-derived receiver metadata. Registry state and collection time can differ. If policy disables requests, it shows <code>Request: none</code>. Disabling requests does not erase previously recorded rows.</p>
+<p><code>openclaw telemetry show</code> displays policy and a CLI-built payload preview, not the exact next Gateway payload or server-derived location information. Registry state and collection time can differ. If policy disables requests, it shows <code>Request: none</code>. Disabling requests does not erase previously recorded rows.</p>
 
 <h2>What we learn</h2>
 <p>Counts are weighted report estimates, not unique installations or users. Configuration and inventory do not measure feature use. Repeated reports can count again.</p>
