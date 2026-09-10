@@ -13,6 +13,7 @@ const { rawConfig } = experimental_readRawConfig({ config: "wrangler.jsonc" });
 
 describe("stats over workerd HTTP", () => {
 	let script;
+	let recordingScript;
 	let runtime;
 	let sqlCalls;
 	let sqlAvailable;
@@ -26,13 +27,43 @@ describe("stats over workerd HTTP", () => {
 			write: false,
 		});
 		script = bundle.outputFiles[0].text;
+		const recordingBundle = await build({
+			stdin: {
+				resolveDir: process.cwd(),
+				contents: `
+					import worker from "./src/index.ts";
+					export default {
+						async fetch(request, env) {
+							let point;
+							// Inject Unicode here: Miniflare's cf override header corrupts it in transit.
+							const incoming = new Request(request, {
+								cf: { ...request.cf, city: " Sa\\u0303o Paulo " },
+							});
+							const response = await worker.fetch(incoming, {
+								...env,
+								TELEMETRY: { writeDataPoint(value) {
+									env.TELEMETRY.writeDataPoint(value);
+									point = value;
+								} },
+							});
+							return Response.json({ status: response.status, body: await response.json(), point });
+						},
+					};
+				`,
+			},
+			bundle: true,
+			format: "esm",
+			platform: "browser",
+			write: false,
+		});
+		recordingScript = recordingBundle.outputFiles[0].text;
 	});
 
 	afterEach(async () => {
 		await runtime?.dispose();
 	});
 
-	async function start() {
+	async function start(workerScript = script) {
 		// Real binding windows reset on wall-clock boundaries. Start with time for the quota assertions.
 		const period = rawConfig.ratelimits.find(({ name }) => name === "RATE_LIMIT").simple.period * 1000;
 		const remaining = period - Date.now() % period;
@@ -41,7 +72,7 @@ describe("stats over workerd HTTP", () => {
 		sqlAvailable = true;
 		runtime = new Miniflare(convertV4MiniflareOptions({
 			modules: true,
-			script,
+			script: workerScript,
 			compatibilityDate: rawConfig.compatibility_date,
 			compatibilityFlags: rawConfig.compatibility_flags,
 			port: 0,
@@ -71,6 +102,32 @@ describe("stats over workerd HTTP", () => {
 			headers: { "cf-connecting-ip": ip },
 		});
 	}
+
+	it("validates named timezones and Unicode geography inside the pinned workerd runtime", async () => {
+		await start(recordingScript);
+		for (const [timezone, stored] of [
+			["America/Los_Angeles", "America/Los_Angeles"],
+			["UTC", "UTC"],
+			["US/Eastern", "US/Eastern"],
+			["Etc/GMT+5", "Etc/GMT+5"],
+			["+05:00", ""],
+			["Invalid/Zone", ""],
+		]) {
+			const response = await runtime.dispatchFetch("https://telemetry.example/api/latest-version", {
+				headers: { "user-agent": "openclaw/2026.9.2 (linux; node/v24.0.0; x64; gateway)" },
+				cf: { country: "BR", regionCode: "SP", timezone },
+			});
+			await expect(response.json()).resolves.toEqual({
+				status: 200,
+				body: { version: "2026.8.2" },
+				point: {
+					indexes: ["2026.9.2"],
+					blobs: ["2026.9.2", "linux", "x64", "node/v24.0.0", "gateway", "", "", "", "BR", "SP", "S\u00e3o Paulo", stored],
+					doubles: [0, 0, 0],
+				},
+			});
+		}
+	}, 30_000);
 
 	it("fills the real cache, reuses it past quota, and denies a cold miss without SQL", async () => {
 		await start();

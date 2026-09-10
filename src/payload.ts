@@ -83,7 +83,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Projects an untrusted body down to the four fields we publish. Unknown keys
+ * Projects an untrusted body down to the documented fields. Unknown keys
  * are dropped on the floor: if a future client sends more, this service keeps
  * storing only what its README promises until it is deliberately updated.
  */

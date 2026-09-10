@@ -1,3 +1,4 @@
+import type { RequestGeography } from "./geography.js";
 import type { ClientIdentity, FeatureStats } from "./payload.js";
 
 /**
@@ -13,7 +14,11 @@ export type DataPoint = {
 
 const LIST_SEPARATOR = ",";
 
-export function buildDataPoint(identity: ClientIdentity, features: FeatureStats | undefined): DataPoint {
+export function buildDataPoint(
+	identity: ClientIdentity,
+	features: FeatureStats | undefined,
+	geography: RequestGeography,
+): DataPoint {
 	return {
 		// Sampling key. Version keeps per-release counts intact under load.
 		indexes: [identity.version],
@@ -26,6 +31,10 @@ export function buildDataPoint(identity: ClientIdentity, features: FeatureStats 
 			features?.channels.join(LIST_SEPARATOR) ?? "",
 			features?.providerFamilies.join(LIST_SEPARATOR) ?? "",
 			features?.plugins.join(LIST_SEPARATOR) ?? "",
+			geography.country,
+			geography.regionCode,
+			geography.city,
+			geography.timezone,
 		],
 		doubles: [
 			features ? 1 : 0,

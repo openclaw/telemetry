@@ -2,6 +2,7 @@ import { keepKnownNames, loadKnownNames, normalizeVersion } from "./allowlist.js
 import { buildDataPoint } from "./analytics.js";
 import type { Env } from "./env.js";
 import { readFeatureStats } from "./feature-stats.js";
+import { parseRequestGeography } from "./geography.js";
 import { parseClientIdentity } from "./payload.js";
 import { renderHomePage } from "./page.js";
 import { queryPublicStats } from "./stats.js";
@@ -153,7 +154,11 @@ async function recordRequest(request: Request, env: Env): Promise<void> {
 
 	try {
 		env.TELEMETRY.writeDataPoint(
-			buildDataPoint({ ...identity, version: normalizeVersion(identity.version) }, validated),
+			buildDataPoint(
+				{ ...identity, version: normalizeVersion(identity.version) },
+				validated,
+				parseRequestGeography(request.cf),
+			),
 		);
 	} catch {
 		// Intentionally ignored: an analytics failure is not a client failure.
