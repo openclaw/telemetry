@@ -13,6 +13,7 @@
     "check": "npm run vocabulary:check && npm run typecheck && npm run test",
     "npm:quality": "node scripts/npm-quality.mjs",
     "telemetry:history": "node scripts/telemetry-history.mjs",
+    "telemetry:capture": "node scripts/telemetry-aggregate-capture.mjs",
     "vocabulary:update": "node scripts/public-vocabulary.mjs",
     "vocabulary:check": "node scripts/public-vocabulary.mjs --check"
   },

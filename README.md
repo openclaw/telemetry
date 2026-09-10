@@ -365,6 +365,101 @@ Only `complete_closed` days are `comparisonEligible` and contribute to
 `summary.completeClosedTotals`. This certifies UTC calendar coverage, not complete events.
 Geography is unknown in this export, including rows collected before geography was recorded.
 
+## Aggregate capture pilot
+
+`npm run telemetry:capture` plans or captures **one explicit closed UTC day** of hourly
+Analytics Engine report aggregates and a **separate** HTTP country query. It is an
+operator-invoked pilot, not a scheduled or full backup. No version/plugin distributions,
+finer geography, raw events, replay, uploads, storage bindings, or retention policy are added.
+The existing historical exporter is unchanged.
+
+The default is a dry run. It reads no credentials, makes no network requests, and creates
+no files:
+
+```bash
+npm run telemetry:capture -- --day 2025-02-03
+```
+
+Choose and approve a private storage location and its access/retention policy before
+performing an actual capture. There is no default output location. The output parent must
+already exist; explicitly resolve symlinked parents to their real paths. Execution needs
+separate operator-provided `TELEMETRY_AE_READ_TOKEN` and `TELEMETRY_HTTP_READ_TOKEN`
+environment variables, plus explicit noncredential account and zone IDs:
+
+```bash
+npm run telemetry:capture -- --execute --day "$UTC_DAY" \
+  --account-id "$ACCOUNT_ID" --zone-id "$ZONE_ID" \
+  --output "$(realpath "$APPROVED_PARENT")/day-$UTC_DAY"
+```
+
+Provide an account-scoped Analytics Engine SQL read token and a separate zone-scoped
+HTTP analytics read token. The tool never discovers credentials, opens an auth store,
+refreshes OAuth, or provisions permissions. It posts only to the fixed Cloudflare
+API endpoints, rejects redirects, and never retries automatically.
+
+Current HTTP dataset settings are requested first. The dataset must be enabled and
+advertise all required metric, dimension and filter fields, a full-day duration, a
+10,000-row page, and sufficient field capacity. The requested day must fit the returned
+`notOlderThan` lookback. Lookback is checked again immediately before the HTTP country
+request, after AE finishes; expiry stops the request and leaves an incomplete bundle.
+Each request has a 45-second deadline. Responses are bounded to 256 KiB for settings,
+4 MiB for AE and 2 MiB for HTTP countries. Truncated/encoded bodies, GraphQL errors,
+unsafe counts, duplicate groups, and reached row limits fail closed.
+Unsupported/error payloads are rejected before their bodies or complete receipts enter
+the bundle; failure diagnostics omit upstream text.
+
+The AE statement is the historical exporter's audited hourly query, with a structural
+maximum of 25 rows and SQL limit 26. It preserves the distinct submitted SQL and saved
+SQL-plus-LF hashes, raw response bytes, plan, attempt, receipt, and their digest pins.
+`count()` remains a query row count, not a stored-row census.
+
+The HTTP query uses `httpRequestsAdaptiveGroups` with the exact host
+`telemetry.openclaw.ai`, path `/api/latest-version`, `requestSource: eyeball`, and
+half-open UTC day. It requests only country, `count`, and average `sampleInterval`.
+All methods, statuses and bots within that scope remain included. HTTP `count` is
+already estimated; the sampling interval is diagnostic, **not another multiplier**.
+Country counts must be nonnegative safe JSON integers and are exported and summed as
+exact decimal strings. Special, empty and null country labels remain distinct.
+Absent countries and empty results are unknown, not zero.
+
+### Bundle and offline verification
+
+The private bundle contains `bundle-plan.json`, the `ae/` capture, unchanged exporter
+outputs in `ae-daily/`, HTTP settings/query responses and receipts in `http/`, and
+normalized `http/country.json`. Directories are `0700` and files `0600`. Both sources'
+local prerequisites are validated before exclusively claiming the output directory,
+which happens before the first request. A concurrent loser makes no request.
+
+`manifest.json` is written last, only after both captures validate and offline
+regeneration matches all derived outputs byte-for-byte. Completion means **query/wire
+completeness**, not complete events or census coverage. Missing AE hours remain unknown
+through the unchanged exporter; HTTP requests are never joined to AE reports or used
+to infer geography for pre-geography AE rows.
+
+```bash
+npm run telemetry:capture -- --verify --day "$UTC_DAY" \
+  --account-id "$ACCOUNT_ID" --zone-id "$ZONE_ID" \
+  --output "$(realpath "$APPROVED_PARENT")/day-$UTC_DAY"
+```
+
+Verification needs no credentials or network. It binds the requested day, source
+identities, exact queries, raw bytes, receipts and hashes, then reruns the unchanged
+historical exporter in a private owned temporary directory outside the bundle.
+All three regenerated AE files must match; only the verifier's scratch is removed.
+Hashes establish internally consistent operator-selected evidence, not independent
+server authentication.
+
+An execute rerun checks an existing bundle **before** reading credentials or fetching
+metadata, returning `unchanged` only after the same offline verification. It still works
+after upstream retention expires. Partial, conflicting, extra, symlinked, hardlinked or
+non-private files fail without overwrite, repair, resume or network access. Failed
+captures retain their incomplete evidence; absence of a valid completion manifest
+means the bundle is not complete. Review failures and choose a new explicit destination
+only after resolving the cause.
+
+This pilot changes neither Analytics Engine retention nor the receiver's collection
+or runtime behavior.
+
 ## License
 
 MIT © OpenClaw Foundation
