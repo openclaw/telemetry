@@ -292,6 +292,79 @@ Historical rows may contain mixed-case names or case-distinct duplicates from ol
 This repair canonicalizes new rows only; stats consumers must validate historical coverage and handle
 those rows explicitly rather than assume the stored window is already canonical.
 
+## Offline historical export
+
+`npm run telemetry:history` exports **one archived hourly Analytics Engine query** to
+`daily.json`, `daily.csv`, and `manifest.json`. It does not contact Cloudflare or npm, need
+credentials, change the Worker, restore raw events, merge overlapping captures, or create a
+backup job. Backups are separately planned. Existing `npm:quality` tooling is unchanged.
+
+The input directory must contain `capture-plan.json` and a selected query directory with
+`query.sql`, `response.json`, `receipt.json`, and `attempt.json`. Select the plan and receipt
+using SHA-256 digests from your trusted capture record:
+
+```bash
+npm run telemetry:history -- \
+  --archive /private/archive/ae \
+  --query q2 \
+  --plan-sha256 "$PLAN_SHA256" \
+  --receipt-sha256 "$RECEIPT_SHA256" \
+  --output /private/exports/hourly-history
+```
+
+The output parent must already exist. Output must be outside the archive, with no symlinks or
+path traversal. New directories are mode `0700`; files are `0600`. A rerun returns `unchanged`
+only after verifying every existing artifact byte-for-byte. Conflicting, incomplete, or
+non-private destinations fail without overwrite. Source files are never changed.
+
+The v1 input contract is intentionally narrow:
+
+- The selected plan entry contains `id`, `sql`, `sqlSha256`, `structuralMaxRows`, and `sqlLimit`.
+  The SQL must match the hourly statement in
+  [`scripts/lib/telemetry-history.mjs`](scripts/lib/telemetry-history.mjs), including its
+  aliases, ordering, table, feature predicate, exclusive end, and `FORMAT JSON`. Only UTC
+  bounds and the limit vary. Windows are bounded to 93 days at whole-second precision;
+  `structuralMaxRows` is `ceil(window hours) + 1`, and `sqlLimit` is one greater.
+- The plan supplies explicit UTC `windowStartInclusive`, `windowEndExclusive`, and
+  `captureStartedAt`. Bounds may use `Z` or `+00:00`. SQL and result `DateTime` strings are UTC,
+  never host-local. Capture, attempt, and receipt timestamps accept up to six fractional
+  digits, are preserved verbatim in provenance, and must follow exact microsecond order.
+  Query bounds remain whole-second instants.
+- The receipt must certify a complete HTTP 200, unredacted, untruncated response without a
+  reached limit. Raw response bytes must match its `wireBytesRead` and `wireSha256`; row counts
+  and ordered column metadata must agree between receipt and response.
+- The submitted SQL digest binds the **exact plan string**. The saved `query.sql` may equal
+  that string or add **exactly one LF**. Both byte representations are recorded separately;
+  arbitrary whitespace is not normalized.
+- Rows contain `bucket`, `weightedReports`, `queryRows`, `featureReports`, `featureQueryRows`,
+  `minSampleInterval`, `maxSampleInterval`, `latestEventAt`, and `latestFeatureAt`. Counts must
+  be UInt64 decimal strings; sample intervals are positive UInt32 numbers. Duplicate,
+  unordered, out-of-window, inconsistent, or malformed rows fail closed. Zero-feature
+  watermarks use the query's epoch sentinel and are exported as null.
+
+Input reads are bounded to 1 MiB for the plan, 64 KiB for the receipt, 16 KiB for the attempt,
+9,500 bytes for SQL, and 4 MiB for the response, with at most 2,233 hourly rows. The manifest
+records exact input/output hashes, the submitted/saved SQL relationship, event watermarks,
+sampling ranges, coverage, and comparison totals. Pins establish operator-selected evidence
+and internal consistency, not independent server authentication. Attempt metadata is hashed
+in the output but not externally pinned. Arbitrary capture headers and paths are not copied.
+
+### Reading the daily output
+
+`weightedReports` and `featureReports` are sampled report estimates. `queryRows` and
+`featureQueryRows` are query row counts, not a stored-row census. Feature counts use the same
+query's sample; no cross-query percentage or opt-in rate is calculated. None of these values
+counts unique installations or users. Counts and sums remain exact decimal strings in JSON;
+CSV readers must preserve count columns as text rather than floating-point numbers.
+
+Daily `coverage` is `partial_edge`, `missing_hours`, or `complete_closed`. `missingHours`
+records absent hourly buckets even on partial edge days; `partialHours` records boundary
+hours not fully queried. Observed partial sums are retained, but a day with no observed
+hours has null counts, not zeros. Dates beyond the capture window are not generated.
+Only `complete_closed` days are `comparisonEligible` and contribute to
+`summary.completeClosedTotals`. This certifies UTC calendar coverage, not complete events.
+Geography is unknown in this export, including rows collected before geography was recorded.
+
 ## License
 
 MIT © OpenClaw Foundation
