@@ -26,6 +26,7 @@ pre code { background: none; padding: 0; }
 table { border-collapse: collapse; width: 100%; font-size: .95rem; }
 th, td { text-align: left; padding: .5rem .6rem; border-bottom: 1px solid var(--line); vertical-align: top; }
 th { color: var(--muted); font-weight: 600; }
+td code { overflow-wrap: anywhere; }
 a { color: var(--accent); }
 .never li { margin: .2rem 0; }
 footer { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--line); color: var(--muted); font-size: .9rem; }
@@ -35,6 +36,10 @@ footer { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--line
 .stats-grid { display: grid; gap: 2rem; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); }
 .stats-grid h3 { font-size: 1rem; margin-bottom: .4rem; }
 .stats-grid p { font-size: .85rem; overflow-wrap: anywhere; }
+.stats-grid .cohort { grid-column: 1 / -1; }
+.cohort th:first-child, .cohort td:first-child { width: 38%; }
+.cohort th:not(:first-child), .cohort td:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.cohort-share { display: block; color: var(--muted); font-size: .85rem; }
 [hidden] { display: none !important; }
 .muted { color: var(--muted); }
 </style>
@@ -100,13 +105,15 @@ footer { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--line
   <p class="muted" id="stats-generated"></p>
 </div>
 <div class="stats-grid" id="stats" hidden>
-  <div><h3>Versions</h3><table><thead><tr><th>Version</th><th>Reports</th></tr></thead><tbody id="versions"></tbody></table></div>
-  <div><h3>Platforms</h3><table><thead><tr><th>Platform</th><th>Reports</th></tr></thead><tbody id="platforms"></tbody></table></div>
+  <div class="cohort"><h3>Versions</h3><p class="muted">Up to 10 rows from a top-25 ranking by reports. This is a truncated breakdown.</p><table><thead><tr><th>Version</th><th>Reports</th><th>With features</th></tr></thead><tbody id="versions"></tbody></table></div>
+  <div class="cohort"><h3>Platforms</h3><p class="muted">Up to 10 rows from a top-25 ranking by reports. This is a truncated breakdown.</p><table><thead><tr><th>Platform</th><th>Reports</th><th>With features</th></tr></thead><tbody id="platforms"></tbody></table></div>
+  <div class="cohort"><h3>Reported process architecture</h3><p class="muted">Architecture of the reporting process, not physical device hardware. Unrecognized values are grouped as other; missing values as unknown.</p><table><thead><tr><th>Architecture</th><th>Reports</th><th>With features</th></tr></thead><tbody id="architectures"></tbody></table></div>
   <div><h3>Configured channels</h3><p class="muted" id="channels-meta"></p><table><thead><tr><th>Channel</th><th>Reports</th></tr></thead><tbody id="channels"></tbody></table></div>
   <div><h3>Configured providers</h3><p class="muted" id="providers-meta"></p><table><thead><tr><th>Provider</th><th>Reports</th></tr></thead><tbody id="providers"></tbody></table></div>
   <div><h3>Plugin inventory</h3><p class="muted" id="plugins-meta"></p><table><thead><tr><th>Plugin</th><th>Reports</th></tr></thead><tbody id="plugins"></tbody></table></div>
 </div>
-<p class="muted">Top ten entries per table. Category queries can use different samples, so their report bases and latest event times may differ. New public-name acceptance improves coverage; it does not by itself prove increased adoption.</p>
+<p class="muted">Feature percentages use only the feature reports and reports in the same row and query. They are not opt-in rates. Queries can use different samples; row totals need not match the summary or other tables. An unavailable percentage is not zero.</p>
+<p class="muted">Top ten entries per feature table. Category queries can use different samples, so their report bases and latest event times may differ. New public-name acceptance improves coverage; it does not by itself prove increased adoption.</p>
 
 <footer>
 Run by the OpenClaw Foundation. Source: <a href="https://github.com/openclaw/telemetry">github.com/openclaw/telemetry</a> ·
@@ -120,29 +127,45 @@ Docs: <a href="https://docs.openclaw.ai/gateway/telemetry">docs.openclaw.ai/gate
     const response = await fetch("/api/stats", { cache: "no-store" });
     if (!response.ok) throw new Error("unavailable");
     const data = await response.json();
-    const fill = (id, rows) => {
+    const fill = (id, rows, cohort = false) => {
       const tbody = document.getElementById(id);
       tbody.innerHTML = "";
-      if (!rows.length) {
+      if (!rows?.length) {
         const tr = document.createElement("tr");
         const empty = document.createElement("td");
-        empty.colSpan = 2;
-        empty.textContent = "No reports.";
+        empty.colSpan = cohort ? 3 : 2;
+        empty.textContent = rows ? "No reports." : "Unavailable.";
         tr.append(empty);
         tbody.append(tr);
       }
-      for (const [label, count] of rows.slice(0, 10)) {
+      for (const [label, count, features] of (rows ?? []).slice(0, 10)) {
         const tr = document.createElement("tr");
         const name = document.createElement("td");
         name.textContent = label;
         const value = document.createElement("td");
         value.textContent = count.toLocaleString();
         tr.append(name, value);
+        if (cohort) {
+          const featureValue = document.createElement("td");
+          if (Number.isSafeInteger(features) && features >= 0 && features <= count) {
+            featureValue.textContent = features.toLocaleString();
+            const share = document.createElement("span");
+            share.className = "cohort-share";
+            share.textContent = count > 0
+              ? (features / count).toLocaleString(undefined, { style: "percent", maximumFractionDigits: 1 })
+              : "Unavailable";
+            featureValue.append(share);
+          } else {
+            featureValue.textContent = "Unavailable";
+          }
+          tr.append(featureValue);
+        }
         tbody.append(tr);
       }
     };
-    fill("versions", data.versions.map((row) => [row.version, row.pings]));
-    fill("platforms", data.platforms.map((row) => [row.platform, row.pings]));
+    fill("versions", data.versions.map((row) => [row.version, row.pings, row.featureReports]), true);
+    fill("platforms", data.platforms.map((row) => [row.platform, row.pings, row.featureReports]), true);
+    fill("architectures", data.architectures?.map((row) => [row.architecture, row.pings, row.featureReports]), true);
     fill("channels", data.channels.map((row) => [row.channel, row.reports]));
     fill("providers", data.providerFamilies.map((row) => [row.provider, row.reports]));
     fill("plugins", data.plugins.map((row) => [row.plugin, row.reports]));

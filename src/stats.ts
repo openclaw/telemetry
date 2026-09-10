@@ -6,6 +6,7 @@ type FeatureMetadata = {
 	latestFeatureEventAt: string | null;
 };
 type ReportCount = { reports: number; installs: number };
+type CohortCount = { pings: number; featureReports: number };
 
 /** Weighted reports, not unique installations or feature invocations. */
 export type PublicStats = {
@@ -19,11 +20,12 @@ export type PublicStats = {
 		providerFamilies: FeatureMetadata;
 		plugins: FeatureMetadata;
 	};
-	versions: Array<{ version: string; pings: number }>;
-	platforms: Array<{ platform: string; pings: number }>;
+	versions: Array<{ version: string } & CohortCount>;
+	platforms: Array<{ platform: string } & CohortCount>;
 	channels: Array<{ channel: string } & ReportCount>;
 	providerFamilies: Array<{ provider: string } & ReportCount>;
 	plugins: Array<{ plugin: string } & ReportCount>;
+	architectures: Array<{ architecture: string } & CohortCount>;
 };
 
 const WINDOW_DAYS = 7;
@@ -31,6 +33,7 @@ const SQL_ENDPOINT = "https://api.cloudflare.com/client/v4/accounts";
 const QUERY_TIMEOUT_MS = 10_000;
 const MAX_QUERY_BYTES = 9500;
 const EMPTY_TIMESTAMP = "1970-01-01 00:00:00";
+const ARCHITECTURES = ["arm64", "x64", "arm", "other", "unknown"];
 type SqlRow = Record<string, unknown>;
 
 function record(value: unknown): value is SqlRow {
@@ -116,12 +119,18 @@ function featureResult(rows: SqlRow[], start: string, end: string) {
 	return { metadata: { featureReports, latestFeatureEventAt }, ranked };
 }
 
-function grouped(rows: SqlRow[], key: "version" | "platform"): Array<{ name: string; pings: number }> {
-	if (rows.length > 25) throw new Error("Invalid grouped result");
+function grouped(rows: SqlRow[], key: "version" | "platform" | "architecture"): Array<{ name: string } & CohortCount> {
+	if (rows.length > (key === "architecture" ? ARCHITECTURES.length : 25)) throw new Error("Invalid grouped result");
+	const seen = new Set<string>();
 	return rows.map((row) => {
 		const name = row[key];
-		if (typeof name !== "string" || !name) throw new Error("Invalid group label");
-		return { name, pings: count(row.pings) };
+		if (typeof name !== "string" || !name || seen.has(name) ||
+			(key === "architecture" && !ARCHITECTURES.includes(name))) throw new Error("Invalid group label");
+		seen.add(name);
+		const pings = count(row.pings);
+		const featureReports = count(row.featureReports);
+		if (featureReports > pings) throw new Error("Invalid cohort report count");
+		return { name, pings, featureReports };
 	});
 }
 
@@ -144,15 +153,21 @@ export async function queryPublicStats(env: Env): Promise<PublicStats | undefine
 				"max(timestamp) AS latestEventAt," +
 				`max(if(double1=1,timestamp,toDateTime('${EMPTY_TIMESTAMP}'))) AS latestFeatureEventAt ` +
 				`FROM openclaw_telemetry WHERE ${where}`,
-			`SELECT blob1 AS version,sum(_sample_interval) AS pings FROM openclaw_telemetry WHERE ${where} GROUP BY version ORDER BY pings DESC LIMIT 25`,
-			`SELECT blob2 AS platform,sum(_sample_interval) AS pings FROM openclaw_telemetry WHERE ${where} GROUP BY platform ORDER BY pings DESC LIMIT 25`,
+			"SELECT blob1 AS version,sum(_sample_interval) AS pings,sumIf(_sample_interval,double1=1) AS featureReports " +
+				`FROM openclaw_telemetry WHERE ${where} GROUP BY version ORDER BY pings DESC LIMIT 25`,
+			"SELECT blob2 AS platform,sum(_sample_interval) AS pings,sumIf(_sample_interval,double1=1) AS featureReports " +
+				`FROM openclaw_telemetry WHERE ${where} GROUP BY platform ORDER BY pings DESC LIMIT 25`,
 			featureQuery("blob6", where),
 			featureQuery("blob7", where),
 			featureQuery("blob8", where),
+			// A sixth row is an overflow sentinel, never a silently truncated architecture breakdown.
+			"SELECT if(blob3='arm64','arm64',if(blob3='x64','x64',if(blob3='arm','arm',if(blob3='','unknown',if(blob3='unknown','unknown','other'))))) AS architecture," +
+				"sum(_sample_interval) AS pings,sumIf(_sample_interval,double1=1) AS featureReports " +
+				`FROM openclaw_telemetry WHERE ${where} GROUP BY architecture ORDER BY pings DESC LIMIT 6`,
 		].map(bounded);
-		const [summaryRows, versionRows, platformRows, channelRows, providerRows, pluginRows] =
+		const [summaryRows, versionRows, platformRows, channelRows, providerRows, pluginRows, architectureRows] =
 			await Promise.all(sql.map((query) => runQuery(env, query)));
-		if (!summaryRows || !versionRows || !platformRows || !channelRows || !providerRows || !pluginRows) return undefined;
+		if (!summaryRows || !versionRows || !platformRows || !channelRows || !providerRows || !pluginRows || !architectureRows) return undefined;
 		const summary = aggregate(summaryRows);
 		const totalPings = count(summary.totalPings);
 		const featureReports = count(summary.featureReports);
@@ -171,11 +186,12 @@ export async function queryPublicStats(env: Env): Promise<PublicStats | undefine
 				latestFeatureEventAt: watermark(summary.latestFeatureEventAt, featureReports, windowStart, windowEnd),
 			},
 			featureMetadata: { channels: channels.metadata, providerFamilies: providers.metadata, plugins: plugins.metadata },
-			versions: grouped(versionRows, "version").map(({ name, pings }) => ({ version: name, pings })),
-			platforms: grouped(platformRows, "platform").map(({ name, pings }) => ({ platform: name, pings })),
+			versions: grouped(versionRows, "version").map(({ name, ...counts }) => ({ version: name, ...counts })),
+			platforms: grouped(platformRows, "platform").map(({ name, ...counts }) => ({ platform: name, ...counts })),
 			channels: channels.ranked.map(({ name, ...counts }) => ({ channel: name, ...counts })),
 			providerFamilies: providers.ranked.map(({ name, ...counts }) => ({ provider: name, ...counts })),
 			plugins: plugins.ranked.map(({ name, ...counts }) => ({ plugin: name, ...counts })),
+			architectures: grouped(architectureRows, "architecture").map(({ name, ...counts }) => ({ architecture: name, ...counts })),
 		};
 	} catch {
 		return undefined;

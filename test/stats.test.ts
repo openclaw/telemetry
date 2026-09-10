@@ -415,18 +415,18 @@ describe("GET /api/stats", () => {
 		vi.unstubAllGlobals();
 	});
 
-	it("runs six Analytics Engine queries on a cold request", async () => {
+	it("runs seven Analytics Engine queries on a cold request", async () => {
 		const response = await worker.fetch(
 			new Request("https://telemetry.example/api/stats"),
 			testEnv(),
 		);
 		expect(response.status).toBe(200);
 		expect(response.headers.get("cache-control")).toBe("public, max-age=600");
-		expect(sqlCalls).toBe(6);
+		expect(sqlCalls).toBe(7);
 		const body = (await response.json()) as { versions: Array<{ version: string }> };
 		expect(body.versions[0]?.version).toBe("2026.8.2");
 		expect(Object.keys(body).sort()).toEqual([
-			"channels", "featureMetadata", "generatedAt", "platforms", "plugins",
+			"architectures", "channels", "featureMetadata", "generatedAt", "platforms", "plugins",
 			"providerFamilies", "summary", "versions", "windowDays", "windowEnd", "windowStart",
 		]);
 	});
@@ -439,7 +439,7 @@ describe("GET /api/stats", () => {
 			env,
 		);
 		const firstBody = await first.json();
-		expect(sqlCalls).toBe(6);
+		expect(sqlCalls).toBe(7);
 		limit.mockResolvedValue({ success: false });
 		for (const stored of cache.store.values()) {
 			stored.headers.set("age", "590");
@@ -451,7 +451,7 @@ describe("GET /api/stats", () => {
 			env,
 		);
 		expect(second.status).toBe(200);
-		expect(sqlCalls).toBe(6);
+		expect(sqlCalls).toBe(7);
 		expect(cache.store.size).toBe(1);
 		expect(limit).toHaveBeenCalledTimes(1);
 		expect(second.headers.get("access-control-allow-origin")).toBe("*");
@@ -464,17 +464,17 @@ describe("GET /api/stats", () => {
 	});
 
 	it.each([
-		{ age: "600", available: true, allowed: true, status: 200, queries: 12 },
-		{ age: "14400", available: true, allowed: true, status: 200, queries: 12 },
-		{ age: null, available: true, allowed: true, status: 200, queries: 12 },
-		{ age: "invalid", available: true, allowed: true, status: 200, queries: 12 },
-		{ age: "", available: true, allowed: true, status: 200, queries: 12 },
-		{ age: "1.5", available: true, allowed: true, status: 200, queries: 12 },
-		{ age: "1e-3", available: true, allowed: true, status: 200, queries: 12 },
-		{ age: "+1", available: true, allowed: true, status: 200, queries: 12 },
-		{ age: "-0", available: true, allowed: true, status: 200, queries: 12 },
-		{ age: "601", available: false, allowed: true, status: 503, queries: 12 },
-		{ age: "601", available: true, allowed: false, status: 429, queries: 6 },
+		{ age: "600", available: true, allowed: true, status: 200, queries: 14 },
+		{ age: "14400", available: true, allowed: true, status: 200, queries: 14 },
+		{ age: null, available: true, allowed: true, status: 200, queries: 14 },
+		{ age: "invalid", available: true, allowed: true, status: 200, queries: 14 },
+		{ age: "", available: true, allowed: true, status: 200, queries: 14 },
+		{ age: "1.5", available: true, allowed: true, status: 200, queries: 14 },
+		{ age: "1e-3", available: true, allowed: true, status: 200, queries: 14 },
+		{ age: "+1", available: true, allowed: true, status: 200, queries: 14 },
+		{ age: "-0", available: true, allowed: true, status: 200, queries: 14 },
+		{ age: "601", available: false, allowed: true, status: 503, queries: 14 },
+		{ age: "601", available: true, allowed: false, status: 429, queries: 7 },
 	])("treats cache age $age as a miss (available=$available, allowed=$allowed)", async ({ age, available, allowed, status, queries }) => {
 		const limit = vi.fn().mockResolvedValue({ success: true });
 		const env = testEnv({ RATE_LIMIT: { limit } });
@@ -531,7 +531,7 @@ describe("GET /api/stats", () => {
 		sqlAvailable = true;
 		const recovered = await worker.fetch(request(), testEnv());
 		expect(recovered.status).toBe(200);
-		expect(sqlCalls).toBe(12);
+		expect(sqlCalls).toBe(14);
 	});
 
 	it.each(["match", "put"] as const)("serves successful SQL when cache.%s rejects", async (operation) => {
@@ -543,11 +543,11 @@ describe("GET /api/stats", () => {
 		await expect(response.json()).resolves.toMatchObject({
 			versions: [{ version: "2026.8.2", pings: 4 }],
 		});
-		expect(sqlCalls).toBe(6);
+		expect(sqlCalls).toBe(7);
 		if (operation === "put") {
 			expect(cache.store.size).toBe(0);
 			expect((await worker.fetch(request(), testEnv())).status).toBe(200);
-			expect(sqlCalls).toBe(12);
+			expect(sqlCalls).toBe(14);
 		}
 	});
 
@@ -560,7 +560,7 @@ describe("GET /api/stats", () => {
 		}
 		expect(writeDataPoint).toHaveBeenCalledTimes(20);
 		expect((await worker.fetch(request(), env)).status).toBe(200);
-		expect(sqlCalls).toBe(6);
+		expect(sqlCalls).toBe(7);
 	});
 
 	it("preserves the existing recording counter when stats misses exhaust their budget", async () => {
@@ -574,7 +574,7 @@ describe("GET /api/stats", () => {
 			expect((await worker.fetch(request(), env)).status).toBe(503);
 		}
 		expect((await worker.fetch(request(), env)).status).toBe(429);
-		expect(sqlCalls).toBe(120);
+		expect(sqlCalls).toBe(140);
 		for (let i = 0; i < 2; i++) {
 			expect((await worker.fetch(request("/api/latest-version"), env)).status).toBe(200);
 		}

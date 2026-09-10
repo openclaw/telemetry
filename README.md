@@ -146,7 +146,16 @@ counts, so the difference between total inventory and named plugins is not a rel
 - `summary.totalPings` and `summary.featureReports` come from their own summary query, not the
   top version/platform rows or feature marginals. `latestEventAt` and `latestFeatureEventAt`
   are that query's latest recorded event timestamps.
-- `versions[].pings` and `platforms[].pings` retain their top-25 API semantics.
+- `versions[].pings` and `platforms[].pings` retain their top-25 API semantics and ordering.
+  Each row adds `featureReports` from the same SQL statement as its `pings`. These are
+  truncated rankings, not complete version or platform distributions.
+- `architectures` groups the already-stored **process architecture** into `arm64`, `x64`,
+  `arm`, `other`, and `unknown` (including empty values), with `pings` and `featureReports`
+  from that group's query. It does not identify physical device hardware. The query requests
+  at most six rows so an unexpected extra bucket fails validation rather than being hidden.
+- A cohort's feature share is its own `featureReports / pings`, unavailable when `pings` is
+  zero. It is not an opt-in rate. Do not divide a row by the summary or another query's total:
+  queries may use different samples. These fields add no new client collection.
 - `channels`, `providerFamilies`, and `plugins` retain their label fields and legacy `installs`
   counts. Each entry adds `reports`, equal to `installs`. Both mean weighted reports, not
   unique installations, users, or feature invocations.
@@ -162,9 +171,15 @@ fails tests and runtime requests rather than truncating names or splitting a cat
 Missing or malformed results, failed required queries, or incomplete coverage return `503`, not empty
 success. Genuine empty aggregates have zero counts and null event watermarks.
 
+The endpoint runs seven statements sharing the same UTC bounds, each within the 9,500-byte budget.
+Duplicate groups, invalid architecture buckets, unsafe counts, or a row's feature count exceeding
+its report count fail closed with `503`.
+
 Responses use a ten-minute server cache, retaining `Age` on hits. The page bypasses its browser cache
 to avoid older response contracts but still reuses the Worker's server cache. It displays top-ten
 tables of reports, category-local bases and watermarks, and the separate response-generation time.
+The architecture table shows every returned bucket. Cohort tables show feature counts and row-local
+percentages; old cached payloads missing these additive fields display unavailable, not zero.
 Accepting additional public names increases coverage; it does not by itself establish increased adoption
 or backfill reports whose names were previously rejected.
 

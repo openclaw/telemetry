@@ -6,6 +6,7 @@
 
 - Record bounded Cloudflare-derived request-origin country, region code, city, and timezone in baseline update-request metadata, without raw IPs or direct identifiers. Replace the unshipped client UTC-offset proposal, preserve existing columns and public stats, and disclose the unchanged three-month retention and feature opt-out boundary.
 - Add offline, manifest-bound npm comparison tooling with matched UTC windows, captured feed cutoffs, anomaly checks, exclusion sensitivity, and separate undated version totals. Download events are never converted to installations or users.
+- Show same-query feature report counts and percentages alongside version and platform rankings, plus a bounded process-architecture breakdown from existing fields. Preserve cached response compatibility and label truncated rankings, unavailable shares, and sampling limits without adding collection.
 - Preserve successful update responses when the version cache fails, and validate cached versions with the same nonempty-string rules as npm responses.
 - Bound User-Agent parsing before matching and reject malformed feature IDs without converting them into public names.
 - Aggregate the complete retained public vocabulary without joint-group truncation, fail closed on incomplete query results, and expose fixed windows and query-local report totals and event watermarks. Label public counts as reports and configuration or inventory, preserving the legacy `installs` API alias.
