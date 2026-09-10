@@ -1,10 +1,10 @@
 # OpenClaw telemetry
 
 The Cloudflare Worker behind [telemetry.openclaw.ai](https://telemetry.openclaw.ai). It answers the
-daily update check that OpenClaw installs make, and records anonymous aggregates from those requests.
+daily update check that OpenClaw installs make, and records request metadata for aggregate analysis.
 
 This repository is public because that is the whole point: you should not have to take our word for
-what the server keeps. [`src/payload.ts`](src/payload.ts) defines the Analytics Engine row
+what the server keeps. [`src/analytics.ts`](src/analytics.ts) defines the Analytics Engine row
 written from a validated request.
 
 ## What it does
@@ -55,27 +55,41 @@ do not opt in automatically. The enabled setting, not a recorded prompt response
 The server limits feature-statistics bodies to 16 KiB while reading the upload. Oversized or
 malformed bodies are discarded, and the request still receives its version answer.
 
-### Optional runtime UTC-offset bucket
+### Cloudflare-derived request geography
 
-The schema-1 receiver also accepts `features.runtimeUtcOffsetBucket`. Its purpose is to help
-investigate clock-dependent runtime compatibility across coarse offset groups, not locate a
-person. A process clock setting can differ from the operator's location.
+Cloudflare processes the connection IP address and provides approximate request-origin
+**country, region code, city, and timezone** in
+[`request.cf`](https://developers.cloudflare.com/workers/runtime-apis/request/).
+The receiver records only `country`, `regionCode`, `city`, and `timezone` from that metadata.
+It never takes geography from client-supplied headers or bodies, and does not copy the full `cf`
+object. These fields can describe a proxy, VPN exit, or remote server rather than a person.
+They are not the operator's locale or the OpenClaw runtime's clock setting.
 
-The planned client contract requires both feature-statistics consent and a **separate, default-off
-UTC-offset opt-in** before including this field. This receiver change does not release that client
-setting or enable collection on existing clients. Only these exact strings are accepted:
-`neg_12_6`, `neg_6_0`, `utc_0`, `pos_0_6`, `pos_6_12`, `pos_12_14`, and `unknown`.
-The receiver does not accept IANA time-zone names or raw numeric offsets, and does not repair
-case or whitespace. An invalid value drops only this field; valid sibling feature fields survive.
-Explicit `unknown` is a valid value, not evidence of operator consent.
+Geography is baseline metadata on recorded update requests, including update-only `GET` requests
+when feature statistics are off or `DO_NOT_TRACK` is set. It requires no additional client
+payload or prompt. Existing request-suppression settings still prevent automatic update requests.
 
-Older clients may omit the field. Older receivers follow the existing unknown-key-drop contract:
-they ignore this addition while retaining recognized feature fields. The schema marker and
-existing payload example above are unchanged.
+[`src/geography.ts`](src/geography.ts) bounds and validates each field independently:
+
+- Country must be two ASCII letters, normalized to uppercase. Missing, malformed, `XX`
+  (unknown), and `T1` (Tor) values are stored as empty strings; no country is inferred.
+- Region is the country-scoped ISO 3166-2 subdivision component, not a region name.
+  It must be one to three uppercase ASCII letters or digits, with leading zeros preserved.
+  It is empty when country is absent or invalid; `cf.region` is not a fallback.
+- City preserves Unicode, trims surrounding whitespace, and normalizes to NFC. Inputs longer
+  than 128 UTF-16 code units are rejected before normalization; normalized values must fit
+  128 UTF-8 bytes. Controls, invisible formatting characters, line separators, and unpaired
+  surrogates are rejected. Names are never transliterated or truncated into different names.
+- Timezone must be a named identifier of at most 64 ASCII bytes accepted by the Worker's
+  `Intl.DateTimeFormat`. Valid aliases such as `UTC` and `Etc/GMT+5` are preserved.
+  Raw numeric offsets are rejected.
+
+Absent or invalid fields are empty strings and do not discard valid siblings or feature statistics.
+Invalid feature bodies still permit baseline metadata recording and a version response.
 
 ## What is stored
 
-One Analytics Engine row per request, with these columns and no others:
+Each recorded request contributes one Analytics Engine data point with these columns and no others:
 
 | Column | Value |
 | --- | --- |
@@ -87,7 +101,10 @@ One Analytics Engine row per request, with these columns and no others:
 | `blob6` | Configured, not explicitly disabled public channel IDs, comma-joined |
 | `blob7` | Public provider IDs from configuration, auth profiles, and model references, comma-joined |
 | `blob8` | Public plugin IDs from enabled inventory, comma-joined |
-| `blob9` | Optional coarse runtime UTC-offset bucket; empty string when absent or invalid |
+| `blob9` | Cloudflare-derived request-origin country |
+| `blob10` | Cloudflare-derived country-scoped region code |
+| `blob11` | Cloudflare-derived city |
+| `blob12` | Cloudflare-derived named timezone |
 | `double1` | `1` if the request included feature stats, else `0` |
 | `double2` | Total enabled plugin count, including plugins not named above |
 | `double3` | Retained session-creation events timestamped within the preceding 24 hours |
@@ -105,12 +122,12 @@ before parsing. Identity fields remain length-bounded and character-filtered. Fe
 complete identifiers of at most 64 characters; malformed or overlength IDs are dropped, never
 repaired or truncated into another name.
 
-The offset bucket is co-located with the existing identity and feature columns in the same
+The geography fields are co-located with the existing identity and feature columns in the same
 Analytics Engine row and dataset, not stored separately. Analytics Engine retains data for
 **three months** under its [published limits](https://developers.cloudflare.com/analytics/analytics-engine/limits/).
-The appended ninth blob remains within the limits of twenty blobs, twenty doubles, one index,
+The twelve blobs remain within the limits of twenty blobs, twenty doubles, one index,
 and 16 KB of blob data per point. Existing column positions and the version sampling key are
-unchanged. No offset field is added to public stats or the homepage.
+unchanged. Public stats and homepage aggregates do not expose geography fields or breakdowns.
 
 Only **publicly known** plugin, channel, and provider ids are ever named. The client reports names
 only for plugins bundled with OpenClaw, trusted official installs, or entries in its official catalog, and this server
@@ -184,12 +201,15 @@ get attention, not billing or security decisions.
 - Credentials, tokens, or secret references
 - IP addresses, hostnames, usernames, or account identifiers
 - Any install ID or device ID
-- IANA time-zone names, raw numeric UTC offsets, or physical-device hardware details
+- Raw numeric UTC offsets, coordinates, postal codes, or physical-device hardware details
 
-These Analytics Engine rows contain no install or device identifier, so the service does not
-maintain per-install histories or retention curves.
+These Analytics Engine rows contain no direct user, account, install, or device identifier.
+Reports are not unique installations or users, and the service does not maintain per-install
+histories or retention curves. The stored combination of request metadata and derived geography
+is not a guarantee of anonymity.
 
-Cloudflare handles TLS and network requests and sees client IP addresses. The Worker reads
+Cloudflare handles TLS and network requests and processes client IP addresses to derive geography.
+The Worker reads
 `cf-connecting-ip` transiently and passes it to Cloudflare's rate-limiting binding; it does not
 write that IP to Analytics Engine. Worker observability, logs, and invocation logs are explicitly
 disabled in [`wrangler.jsonc`](wrangler.jsonc). These settings do not describe or control
@@ -199,19 +219,19 @@ Cloudflare's separate infrastructure-level processing.
 
 | Command or setting | Effect |
 | --- | --- |
-| `openclaw telemetry off` | Stops the feature-stats body. Update checks continue. |
+| `openclaw telemetry off` | Stops the feature-stats body. Update checks and baseline request geography continue. |
 | `DO_NOT_TRACK=1` | Same, enforced from the environment. |
 | `update.checkOnStart: false` | Stops both tiers of automatic update requests. Explicit update commands and other configured services are separate. |
 
 `OPENCLAW_NO_AUTO_UPDATE=1` also prevents automatic update requests. A truthy `CI` suppresses both
 tiers unless a replacement `OPENCLAW_TELEMETRY_ENDPOINT` is explicitly configured.
 
-Under the planned client contract, turning off either feature statistics or the separate offset
-opt-in stops new offset collection. It does not erase previously recorded rows; the same
-three-month Analytics Engine retention applies. This receiver change adds no backup or export job.
+Disabling requests stops future automatic reports; it does not erase previously recorded rows.
+The same three-month Analytics Engine retention applies. This receiver adds no backup or export job.
 
 `openclaw telemetry show` displays policy and a CLI-built payload preview, not the exact next Gateway
-payload: registry state, configuration, and collection time can differ. When policy suppresses requests,
+payload: registry state, configuration, and collection time can differ. It cannot preview
+Cloudflare-derived receiver metadata. When policy suppresses requests,
 it shows `Request: none` (`request: null` in JSON). Client-side
 documentation lives at [docs.openclaw.ai/gateway/telemetry](https://docs.openclaw.ai/gateway/telemetry).
 

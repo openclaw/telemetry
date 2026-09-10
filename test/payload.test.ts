@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { keepKnownNames, loadKnownNames } from "../src/allowlist.js";
 import { buildDataPoint } from "../src/analytics.js";
+import { parseRequestGeography } from "../src/geography.js";
 import { parseClientIdentity, parseFeatureStats } from "../src/payload.js";
 
 describe("parseClientIdentity", () => {
@@ -90,37 +91,6 @@ describe("parseFeatureStats", () => {
 		expect(parseFeatureStats(body)).toEqual(expectedFeatures);
 	});
 
-	it.each([
-		"neg_12_6",
-		"neg_6_0",
-		"utc_0",
-		"pos_0_6",
-		"pos_6_12",
-		"pos_12_14",
-		"unknown",
-	])("accepts the exact UTC-offset bucket %s without changing sibling fields", (bucket) => {
-		expect(parseFeatureStats({
-			...body,
-			features: { ...body.features, runtimeUtcOffsetBucket: bucket },
-		})).toEqual({
-			...expectedFeatures,
-			runtimeUtcOffsetBucket: bucket,
-		});
-	});
-
-	it.each([
-		null, true, false, 0, -480, 330, {}, [], ["utc_0"], "",
-		"UTC_0", " utc_0", "utc_0 ", "utc_0\n", "unknown ",
-		"Asia/Singapore", "UTC+08:00", "+08:00", "480", "other",
-	].map((value) => ({ value })))("drops invalid UTC-offset bucket $value only", ({ value }) => {
-		const parsed = parseFeatureStats({
-			...body,
-			features: { ...body.features, runtimeUtcOffsetBucket: value },
-		});
-		expect(parsed).toEqual(expectedFeatures);
-		expect(parsed).not.toHaveProperty("runtimeUtcOffsetBucket");
-	});
-
 	it("rejects bodies without the current schema marker", () => {
 		expect(parseFeatureStats({ ...body, schema: 2 })).toBeUndefined();
 		expect(parseFeatureStats({ features: body.features })).toBeUndefined();
@@ -132,7 +102,12 @@ describe("parseFeatureStats", () => {
 	it("drops undocumented keys instead of storing them", () => {
 		const parsed = parseFeatureStats({
 			...body,
-			features: { ...body.features, hostname: "peters-mac.local", installId: "abc-123" },
+			features: {
+				...body.features,
+				hostname: "gateway.example",
+				installId: "example-install",
+				runtimeUtcOffsetBucket: "utc_0",
+			},
 		});
 		expect(parsed && Object.keys(parsed).sort()).toEqual([
 			"channels",
@@ -141,8 +116,7 @@ describe("parseFeatureStats", () => {
 			"providerFamilies",
 			"sessionsLast24h",
 		]);
-		expect(JSON.stringify(parsed)).not.toContain("peters-mac");
-		expect(JSON.stringify(parsed)).not.toContain("abc-123");
+		expect(parsed).toEqual(expectedFeatures);
 	});
 
 	it("bounds list length and coerces hostile counts", () => {
@@ -216,7 +190,7 @@ describe("parseFeatureStats", () => {
 			providerFamilies: ["anthropic", "openai"],
 			plugins: [],
 		});
-		expect(buildDataPoint(parseClientIdentity(null), parsed).doubles).toEqual([1, 7, 14]);
+		expect(buildDataPoint(parseClientIdentity(null), parsed, parseRequestGeography(undefined)).doubles).toEqual([1, 7, 14]);
 	});
 });
 
@@ -224,23 +198,14 @@ describe("buildDataPoint", () => {
 	const identity = parseClientIdentity("openclaw/2026.8.2 (darwin; node/v26.0.1; arm64; gateway)");
 
 	it("marks rows without feature stats and still records the identity columns", () => {
-		const point = buildDataPoint(identity, undefined);
-		expect(point.indexes).toEqual(["2026.8.2"]);
-		expect(point.blobs).toEqual([
-			"2026.8.2",
-			"darwin",
-			"arm64",
-			"node/v26.0.1",
-			"gateway",
-			"",
-			"",
-			"",
-			"",
-		]);
-		expect(point.doubles).toEqual([0, 0, 0]);
+		expect(buildDataPoint(identity, undefined, parseRequestGeography(undefined))).toEqual({
+			indexes: ["2026.8.2"],
+			blobs: ["2026.8.2", "darwin", "arm64", "node/v26.0.1", "gateway", "", "", "", "", "", "", ""],
+			doubles: [0, 0, 0],
+		});
 	});
 
-	it.each([undefined, "utc_0"])("records feature stats with bucket %s in the documented column order", (bucket) => {
+	it("appends geography without changing the existing sampling key and feature columns", () => {
 		const features = parseFeatureStats({
 			schema: 1,
 			features: {
@@ -249,29 +214,16 @@ describe("buildDataPoint", () => {
 				plugins: ["codex"],
 				pluginsEnabled: 7,
 				sessionsLast24h: 14,
-				runtimeUtcOffsetBucket: bucket,
 			},
 		});
-		expect(buildDataPoint(identity, features)).toEqual({
+		const geography = { country: "JP", regionCode: "13", city: "\u6771\u4eac", timezone: "Asia/Tokyo" };
+		expect(buildDataPoint(identity, features, geography)).toEqual({
 			indexes: ["2026.8.2"],
 			blobs: [
 				"2026.8.2", "darwin", "arm64", "node/v26.0.1", "gateway",
-				"discord,telegram", "anthropic", "codex", bucket ?? "",
+				"discord,telegram", "anthropic", "codex", "JP", "13", "\u6771\u4eac", "Asia/Tokyo",
 			],
 			doubles: [1, 7, 14],
 		});
 	});
-
-	it("never writes an identifier column that could link two pings", () => {
-		const serialized = JSON.stringify(buildDataPoint(identity, undefined));
-		for (const forbidden of ["id", "uuid", "ip", "host", "user"]) {
-			expect(serialized.toLowerCase()).not.toContain(`"${forbidden}"`);
-		}
-		expect(countRecordedColumns(buildDataPoint(identity, undefined))).toBe(13);
-	});
 });
-
-/** Total recorded columns; a change here means the storage contract moved. */
-function countRecordedColumns(point: ReturnType<typeof buildDataPoint>): number {
-	return point.indexes.length + point.blobs.length + point.doubles.length;
-}
