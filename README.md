@@ -1,7 +1,7 @@
 # OpenClaw telemetry
 
 The Cloudflare Worker behind [telemetry.openclaw.ai](https://telemetry.openclaw.ai). It answers the
-daily update check that OpenClaw installs make and provides anonymous usage aggregates.
+daily update check that OpenClaw installs make.
 
 This repository is public because that is the whole point: you should not have to take our word for
 what the server keeps. [`src/analytics.ts`](src/analytics.ts) defines the Analytics Engine row
@@ -12,8 +12,7 @@ written from a validated request.
 | Route | Purpose |
 | --- | --- |
 | `GET \| POST /api/latest-version` | Returns `{ version, note? }`. `version` is the latest published OpenClaw release (looked up from the npm registry and cached at the edge for 5 minutes). `note` is an optional short message shown in the operator's terminal, used only when a release is worth acting on immediately. |
-| `GET /api/stats` | Public aggregates over the last 7 days. |
-| `GET /` | Human-readable page: what is collected, how to turn it off, and the current aggregates. |
+| `GET /` | Human-readable page: what is collected, how to turn it off, without a public statistics dashboard. |
 
 ## What an install sends
 
@@ -111,7 +110,7 @@ Analytics Engine row and dataset, not stored separately. Analytics Engine retain
 **three months** under its [published limits](https://developers.cloudflare.com/analytics/analytics-engine/limits/).
 The twelve blobs remain within the limits of twenty blobs, twenty doubles, one index,
 and 16 KB of blob data per point. Existing column positions and the version sampling key are
-unchanged. Public stats and homepage aggregates do not expose geography fields or breakdowns.
+unchanged. The service does not publish usage aggregates.
 
 Only **publicly known** plugin, channel, and provider ids are ever named. The client reports names
 only for plugins bundled with OpenClaw, trusted official installs, or entries in its official catalog, and this server
@@ -121,51 +120,12 @@ retained when names disappear from current catalogs. Privately developed
 plugins can contribute to `double2` but are not named. Filtering and deduplication also affect named
 counts, so the difference between total inventory and named plugins is not a reliable private-plugin count.
 
-## Public aggregates
+## Aggregate access
 
-`GET /api/stats` reports weighted estimates over one fixed seven-day UTC interval:
-`windowStart` is inclusive and `windowEnd` is exclusive. All statements use those same bounds.
-`generatedAt` is the response-generation clock, not evidence that data arrived at that time.
-
-- `summary.totalPings` and `summary.featureReports` come from their own summary query, not the
-  top version/platform rows or feature marginals. `latestEventAt` and `latestFeatureEventAt`
-  are that query's latest recorded event timestamps.
-- `versions[].pings` and `platforms[].pings` retain their top-25 API semantics and ordering.
-  Each row adds `featureReports` from the same SQL statement as its `pings`. These are
-  truncated rankings, not complete version or platform distributions.
-- `architectures` groups the already-stored **process architecture** into `arm64`, `x64`,
-  `arm`, `other`, and `unknown` (including empty values), with `pings` and `featureReports`
-  from that group's query. It does not identify physical device hardware. The query requests
-  at most six rows so an unexpected extra bucket fails validation rather than being hidden.
-- A cohort's feature share is its own `featureReports / pings`, unavailable when `pings` is
-  zero. It is not an opt-in rate. Do not divide a row by the summary or another query's total:
-  queries may use different samples. These fields add no new client collection.
-- `channels`, `providerFamilies`, and `plugins` retain their label fields and legacy `installs`
-  counts. Each entry adds `reports`, equal to `installs`. Both mean weighted reports, not
-  unique installations, users, or feature invocations.
-- `featureMetadata` provides each category's own `featureReports` denominator and
-  `latestFeatureEventAt`. Query-time sampling can produce different totals and watermarks
-  between categories and the summary. These are independent estimates, not one database snapshot.
-  Percentages must use only the matching category's denominator.
-
-Each category runs one complete statement over the entire retained public vocabulary. A same-query
-weighted token-length checksum verifies that no unknown, malformed, repeated, or mixed-case tokens
-were silently omitted. Queries are limited to 9,500 UTF-8 bytes; vocabulary growth beyond this bound
-fails tests and runtime requests rather than truncating names or splitting a category across samples.
-Missing or malformed results, failed required queries, or incomplete coverage return `503`, not empty
-success. Genuine empty aggregates have zero counts and null event watermarks.
-
-The endpoint runs seven statements sharing the same UTC bounds, each within the 9,500-byte budget.
-Duplicate groups, invalid architecture buckets, unsafe counts, or a row's feature count exceeding
-its report count fail closed with `503`.
-
-Responses use a ten-minute server cache, retaining `Age` on hits. The page bypasses its browser cache
-to avoid older response contracts but still reuses the Worker's server cache. It displays top-ten
-tables of reports, category-local bases and watermarks, and the separate response-generation time.
-The architecture table shows every returned bucket. Cohort tables show feature counts and row-local
-percentages; old cached payloads missing these additive fields display unavailable, not zero.
-Accepting additional public names increases coverage; it does not by itself establish increased adoption
-or backfill reports whose names were previously rejected.
+The public statistics dashboard and `GET /api/stats` have been removed. The former
+endpoint returns `404` with `Cache-Control: no-store`, including requests for previously
+cached aggregates. The homepage retains collection disclosures and opt-out controls.
+Update checks, analytics recording, and existing data retention are unchanged.
 
 ## Abuse resistance
 
@@ -181,12 +141,6 @@ the edge and in validation:
   vocabulary. Accepted names are lowercased, deduplicated, and sorted; unknown names are dropped.
   Versions must match the release format or become `unknown`. Runtime catalog changes and
   network outages cannot widen the vocabulary or erase its history.
-- **Public stats caching.** Aggregate responses are cached for ten minutes. Cache misses have a
-  separate per-IP limit of 20 requests per minute using the same binding; they do not consume
-  recording capacity, and cache hits consume neither counter. Denied misses return `429`
-  without querying Analytics Engine. Cache failures do not prevent successful SQL responses.
-  Cache hits retain their age and the ten-minute freshness limit; older entries are treated
-  as misses even if the cache retains them longer.
 - **Plausibility.** Raw rows are retained, so a skew attempt appears as a discontinuity in a
   dimension and can be discounted after the fact.
 
@@ -247,16 +201,12 @@ Deploys run from GitHub Actions on pushes to `main` (see
 [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)), using the `CLOUDFLARE_API_TOKEN`
 repository secret.
 
-`/api/stats` additionally needs two Worker secrets — `ACCOUNT_ID` and a read-only
-`ANALYTICS_READ_TOKEN` for the Analytics Engine SQL API. Without them the aggregates endpoint
-returns `503` and everything else keeps working.
-
 ### Updating public names
 
 [`data/public-vocabulary.json`](data/public-vocabulary.json) records immutable OpenClaw revisions,
 retained snapshots, and the public source of legacy aliases (`cli`, `claude`, `gemini`).
 [`src/public-vocabulary.ts`](src/public-vocabulary.ts) exports the complete retained `PUBLIC_NAMES`
-for ingestion and stats consumers. Neither file contains names learned from telemetry requests.
+for ingestion and offline analysis. Neither file contains names learned from telemetry requests.
 
 Before supporting a new OpenClaw release or catalog revision, use Node.js 24 and a trusted local
 OpenClaw Git repository containing the candidate commit and its history:

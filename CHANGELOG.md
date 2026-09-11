@@ -2,7 +2,9 @@
 
 ## Unreleased
 
-**Highlights:** Public update checks and seven-day usage aggregates, with optional feature statistics and no stored install identifiers.
+- Remove the public statistics dashboard and `/api/stats` endpoint while preserving the privacy page, update checks, analytics recording, and data retention.
+
+**Highlights:** Public update checks with optional feature statistics and no stored install identifiers.
 
 - Export one hash-pinned archived hourly Analytics Engine query to private daily JSON, CSV, and provenance/coverage artifacts. Preserve exact sampled report counts, flag partial days and missing hours, and restrict comparison totals to complete closed UTC days. No raw-event restoration, live queries, or backup job.
 - Record bounded Cloudflare-derived request-origin country, region code, city, and timezone in baseline update-request metadata, without raw IPs or direct identifiers. Replace the unshipped client UTC-offset proposal, preserve existing columns and public stats, and disclose the unchanged three-month retention and feature opt-out boundary.

@@ -26,7 +26,7 @@ export function keepKnownNames(values: string[], known: Set<string> | undefined)
 	return [...new Set(values.map((value) => value.toLowerCase()).filter((value) => known.has(value)))].sort();
 }
 
-/** Version strings render on the public stats page, so reject invented shapes. */
+/** Keep recorded version strings within the public release format. */
 export function normalizeVersion(version: string): string {
 	return VERSION_PATTERN.test(version) ? version : UNKNOWN;
 }
