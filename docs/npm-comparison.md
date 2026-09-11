@@ -3,13 +3,14 @@
 Use Node.js 24 and the repository's existing npm dependencies:
 
 ```sh
-npm run npm:quality -- --manifest ./captures/manifest.json --output ./results/run-01
+npm run npm:quality -- --manifest /private/captures/manifest.json --output /private/results/run-01
 ```
 
 This command reads saved JSON only. It does not collect data, fall back to a
 network service, schedule work, publish results, or load the Worker. The output
-directory must not exist, must be outside the input archive, and must have an
-existing parent. Resolve filesystem aliases before passing paths: symlink files
+directory must not exist, must be outside the input archive and this source checkout
+or its linked worktrees, and must have an existing parent. Unrelated private repositories
+remain supported output destinations. Resolve filesystem aliases before passing paths: symlink files
 and symlink parent directories are rejected.
 
 Each successful run creates `quality.json`, `quality.md`, and `input-hashes.json`

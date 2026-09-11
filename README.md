@@ -262,8 +262,9 @@ npm run telemetry:history -- \
   --output /private/exports/hourly-history
 ```
 
-The output parent must already exist. Output must be outside the archive, with no symlinks or
-path traversal. New directories are mode `0700`; files are `0600`. A rerun returns `unchanged`
+The output parent must already exist. Output must be outside the archive and this source checkout
+or its linked worktrees, with no symlinks or path traversal. Unrelated private repositories remain
+supported output destinations. New directories are mode `0700`; files are `0600`. A rerun returns `unchanged`
 only after verifying every existing artifact byte-for-byte. Conflicting, incomplete, or
 non-private destinations fail without overwrite. Source files are never changed.
 

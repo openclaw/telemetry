@@ -10,8 +10,9 @@ import {
 	readSync,
 	writeFileSync,
 } from "node:fs";
-import { dirname, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
+import { dirname, join, parse, relative, resolve, sep } from "node:path";
 import { TextDecoder } from "node:util";
+import { isTelemetryCheckoutPath, isWithinDirectory } from "./private-export-path.mjs";
 
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
@@ -405,11 +406,8 @@ function writeOutputs(output, files, root) {
 	noTraversal(output);
 	const absolute = resolve(output);
 	realDirectory(dirname(absolute));
-	const rel = relative(root, absolute);
-	requireValue(
-		rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel),
-		"output must be outside the input archive",
-	);
+	requireValue(!isTelemetryCheckoutPath(absolute), "output must be outside telemetry source checkouts");
+	requireValue(!isWithinDirectory(absolute, root), "output must be outside the input archive");
 	let existing = false;
 	try {
 		mkdirSync(absolute, { mode: 0o700 });
