@@ -223,7 +223,8 @@ processing is outside those settings.
 tiers unless a replacement `OPENCLAW_TELEMETRY_ENDPOINT` is explicitly configured.
 
 Disabling requests stops future automatic reports; it does not erase previously recorded rows.
-The same three-month Analytics Engine retention applies. This receiver adds no backup or export job.
+The same three-month Analytics Engine retention applies. The receiver does not run backups;
+the optional operator workflow below has separate source-day expiry.
 
 `openclaw telemetry show` displays policy and a CLI-built payload preview, not the exact next Gateway
 payload: registry state, configuration, and collection time can differ. It cannot preview
@@ -297,7 +298,8 @@ those rows explicitly rather than assume the stored window is already canonical.
 `npm run telemetry:history` exports **one archived hourly Analytics Engine query** to
 `daily.json`, `daily.csv`, and `manifest.json`. It does not contact Cloudflare or npm, need
 credentials, change the Worker, restore raw events, merge overlapping captures, or create a
-backup job. Backups are separately planned. Existing `npm:quality` tooling is unchanged.
+backup job. The optional daily R2 workflow is documented below. Existing `npm:quality` tooling
+is unchanged.
 
 The input directory must contain `capture-plan.json` and a selected query directory with
 `query.sql`, `response.json`, `receipt.json`, and `attempt.json`. Select the plan and receipt
@@ -459,6 +461,172 @@ only after resolving the cause.
 
 This pilot changes neither Analytics Engine retention nor the receiver's collection
 or runtime behavior.
+
+## Daily R2 aggregate backups
+
+`telemetry:backup` wraps the same capture and offline verifier. It stores hourly AE
+report totals and independently scoped HTTP country estimates, not raw events,
+version/plugin distributions, finer geography, or a full-dimensional/lossless backup.
+Restoring extracts a verified private bundle; it never replays data into Analytics Engine.
+
+The default is a side-effect-free plan for the seven most recent closed UTC days,
+oldest first. The selected days are frozen once per invocation.
+
+```bash
+npm run telemetry:backup
+npm run telemetry:backup -- backup --execute --config "$PRIVATE_CONFIG" \
+  --work-dir "$(realpath "$PRIVATE_PARENT")/backup-run"
+```
+
+Execution requires a new private work directory and explicit configuration, either
+`--config` pointing to an operator-owned `0600` JSON file or the
+`TELEMETRY_BACKUP_CONFIG` environment variable. Resolve symlinked parent paths first.
+Configuration has this shape; replace every placeholder with the reviewed target:
+
+```json
+{
+  "schemaVersion": 1,
+  "accountId": "<AE_ACCOUNT_ID>",
+  "zoneId": "<HTTP_ZONE_ID>",
+  "r2AccountId": "<R2_ACCOUNT_ID>",
+  "bucket": "<PRIVATE_BUCKET>",
+  "lifecycle": {
+    "firstDay": "<FIRST_COVERED_UTC_DAY>",
+    "lastDay": "<LAST_COVERED_UTC_DAY>",
+    "verifiedAt": "<LIFECYCLE_READBACK_UTC_TIMESTAMP>"
+  }
+}
+```
+
+The lifecycle horizon is an operator attestation of provisioned, read-back rules
+for that exact private bucket, not a request to provision them. Writes outside the
+inclusive horizon fail. Account/zone IDs must be lowercase 32-character hexadecimal
+strings. Dates are `YYYY-MM-DD`; `verifiedAt` is an explicit UTC timestamp with `Z`
+or `+00:00` and up to six fractional digits, compared without losing sub-millisecond precision.
+
+Backup execution reads only these explicitly supplied credentials:
+
+- `TELEMETRY_BACKUP_R2_WRITE_ACCESS_KEY_ID` and
+  `TELEMETRY_BACKUP_R2_WRITE_SECRET_ACCESS_KEY`: a dedicated, bucket-scoped object
+  read/write credential, never an account-wide or lifecycle-admin credential.
+- `TELEMETRY_AE_READ_TOKEN` and `TELEMETRY_HTTP_READ_TOKEN`: the separate capture
+  read credentials, needed only when a remote day is missing.
+
+There is no ambient AWS credential fallback, token discovery or refresh, admin API,
+bucket provisioning, retrying PUT, or credential output. S3 uses the fixed account
+endpoint, bounded requests and responses, no redirects, and one SDK attempt.
+Automatic optional SDK checksums are disabled for R2 compatibility; whole-object
+SHA-256, per-file hashes and offline verification are always required.
+
+### Immutable objects and failures
+
+Each object is `v1/YYYY-MM-DD/aggregate.json`. Its bounded, versioned envelope
+contains only the capture bundle's fixed file inventory, byte-preserving base64,
+per-file SHA-256, source/storage identity hashes, source day and expiry.
+
+An existing object is downloaded and verified before any new capture. Valid remote
+evidence is authoritative even after query retention expires. A conditional
+`If-None-Match: *` PUT never replaces it. An ambiguous PUT result or concurrent
+winner is reconciled by a bounded read and complete offline verification, not a
+second PUT. Wrong days, identities, bytes or hashes fail without overwrite.
+
+Malformed daily evidence or a per-day upstream failure does not starve newer days;
+the invocation still exits nonzero if any selected day remains unresolved.
+Authentication, bucket and native-retention failures stop further writes.
+Public output contains only days, statuses and fixed reason codes, never aggregate
+statistics, SDK/upstream error bodies, account IDs or credentials.
+
+Work directories are `0700` and files `0600`. A local `receipt.json` records the
+result. Missing or incorrect native expiration on either HEAD or GET stops uploads and writes
+`cleanup-required.json` with the exact bucket/object privately. An operator must
+inspect that object and arrange its cleanup; the runner does not delete unknown
+objects or make quarantine copies. Do not upload work directories as CI artifacts.
+
+### Source-age expiry and restore
+
+Expiry is midnight UTC on the original source day plus **three calendar months**,
+clamped to the last day of the target month. It is not 90 days and not three months
+since upload. For example, January 31 expires on April 30.
+
+Restore uses only an independently provided, bucket-scoped object **read** credential:
+`TELEMETRY_BACKUP_R2_READ_ACCESS_KEY_ID` and
+`TELEMETRY_BACKUP_R2_READ_SECRET_ACCESS_KEY`. It does not read writer or AE/HTTP tokens.
+
+```bash
+npm run telemetry:backup -- restore --day "$SOURCE_DAY" --config "$PRIVATE_CONFIG" \
+  --output "$(realpath "$PRIVATE_PARENT")/restore-run"
+```
+
+The output must be new. Restore checks expiry before downloading and immediately
+before releasing `bundle/`, after full private extraction and unchanged offline
+verification. An expired day cannot be restored through this tool.
+
+Native deletion may lag expiry, typically by up to 24 hours and potentially longer
+for rules applied to older objects. The application's cutoff does not promise an
+immediate physical purge or deny reads made directly with other valid credentials.
+
+### Provision and renew lifecycle rules
+
+Generate one reviewed native Wrangler/REST plan for seven days back and 365 days
+forward from an explicit UTC anchor. This only writes local JSON; it needs no admin
+credential and makes no request. Even for a new empty dedicated bucket, first obtain
+its actual native lifecycle readback as a private `{"rules": [...]}` file:
+
+```bash
+npm run telemetry:backup -- lifecycle-plan --anchor "$UTC_DAY" \
+  --previous "$ACTUAL_PRIVATE_LIFECYCLE_READBACK" \
+  --output "$(realpath "$PRIVATE_PARENT")/lifecycle-proposed.json"
+```
+
+The generator preserves the readback's bucket-wide, enabled seven-day multipart-abort
+rule, including its actual ID. It does not invent a replacement default. A default-only
+readback produces 373 rules: that preserved rule plus 372 dated object-expiration rules.
+Missing, altered or additional unrecognized rules fail closed.
+
+Renew using the existing reviewed native rules, including rules for retained or
+expired-but-not-yet-deleted objects:
+
+```bash
+npm run telemetry:backup -- lifecycle-plan --anchor "$UTC_DAY" \
+  --previous "$EXISTING_PRIVATE_RULES" \
+  --output "$(realpath "$PRIVATE_PARENT")/lifecycle-renewal.json"
+```
+
+Renewal preserves old daily rules, rejects conflicting/unrecognized rules, and fails
+at 1,000 rules rather than silently pruning. Rules may only be removed after an
+operator has independently confirmed that their objects are gone. Do not shorten
+the horizon by feeding an incomplete readback to the generator.
+
+An authorized operator can apply the reviewed native plan once with existing
+Wrangler admin authentication, outside the daily runner:
+
+```bash
+npx wrangler r2 bucket lifecycle set "$R2_BUCKET" --file "$REVIEWED_PLAN"
+```
+
+Read back the exact bucket's rules and verify native expiration on a real object
+before recording or extending the approved horizon. No S3 admin key is needed.
+
+### Daily workflow gate
+
+The daily workflow is disabled unless repository variable
+`TELEMETRY_BACKUPS_ENABLED` is exactly `true`. Both its 02:17 UTC schedule and manual
+dispatch execute only on `main`. It exposes no artifact uploads or aggregate output.
+The capture step receives the configuration and four backup credentials above as
+same-named secrets; restore credentials and lifecycle-admin authentication are not
+available to it.
+
+Before enabling, independently verify the exact account and bucket, disabled public
+`r2.dev` access and custom domains, lifecycle readback/horizon, bucket-scoped writer
+and separate reader permissions, real upload/download/offline verification,
+duplicate-PUT protection and the exact native HEAD and GET expiration headers. Renew the verified
+horizon before it runs out.
+
+An independent alert for a missing verified daily object after 36 hours is also
+required before claiming unattended protection. Its recipient and delivery route
+must be configured outside this workflow; a scheduled workflow cannot reliably
+monitor its own absence. GitHub can disable scheduled workflows after 60 days of
+repository inactivity, and scheduled runs can be delayed or dropped.
 
 ## License
 

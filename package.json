@@ -14,10 +14,12 @@
     "npm:quality": "node scripts/npm-quality.mjs",
     "telemetry:history": "node scripts/telemetry-history.mjs",
     "telemetry:capture": "node scripts/telemetry-aggregate-capture.mjs",
+    "telemetry:backup": "node scripts/telemetry-backup.mjs",
     "vocabulary:update": "node scripts/public-vocabulary.mjs",
     "vocabulary:check": "node scripts/public-vocabulary.mjs --check"
   },
   "devDependencies": {
+    "@aws-sdk/client-s3": "3.1131.0",
     "@cloudflare/workers-types": "^5.20260905.1",
     "typescript": "^7.0.2",
     "vitest": "^5.0.0",
