@@ -1,0 +1,35 @@
+name: Telemetry Daily Backup
+
+on:
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: telemetry-r2-daily-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    if: github.ref == 'refs/heads/main' && vars.TELEMETRY_BACKUPS_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Verify or capture seven closed UTC days
+        run: node scripts/telemetry-backup.mjs backup --execute --work-dir "$RUNNER_TEMP/telemetry-backup"
+        env:
+          TELEMETRY_BACKUP_CONFIG: ${{ secrets.TELEMETRY_BACKUP_CONFIG }}
+          TELEMETRY_BACKUP_R2_WRITE_ACCESS_KEY_ID: ${{ secrets.TELEMETRY_BACKUP_R2_WRITE_ACCESS_KEY_ID }}
+          TELEMETRY_BACKUP_R2_WRITE_SECRET_ACCESS_KEY: ${{ secrets.TELEMETRY_BACKUP_R2_WRITE_SECRET_ACCESS_KEY }}
+          TELEMETRY_AE_READ_TOKEN: ${{ secrets.TELEMETRY_AE_READ_TOKEN }}
+          TELEMETRY_HTTP_READ_TOKEN: ${{ secrets.TELEMETRY_HTTP_READ_TOKEN }}
