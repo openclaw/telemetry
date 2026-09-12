@@ -938,11 +938,14 @@ describe("native lifecycle plans", () => {
 		expect(fetchMock).not.toHaveBeenCalled();
 	});
 
-	it("preserves the native seven-day multipart default without accepting object-expiration overrides", async () => {
+	it.each([
+		["empty conditions", {}],
+		["empty prefix", { prefix: "" }],
+	])("preserves the native seven-day multipart default with %s", async (_name, conditions) => {
 		const rule = {
-			id: "Abort incomplete multipart uploads",
+			id: "Default Multipart Abort Rule",
 			enabled: true,
-			conditions: { prefix: "" },
+			conditions,
 			abortMultipartUploadsTransition: { condition: { type: "Age", maxAge: 604_800 } },
 		};
 		const previous = output("provider-default.json");
@@ -956,7 +959,9 @@ describe("native lifecycle plans", () => {
 				output: planned,
 			}),
 		).toEqual({ status: "planned" });
-		expect(JSON.parse(readFileSync(planned)).rules).toContainEqual(rule);
+		const plan = JSON.parse(readFileSync(planned));
+		expect(plan.rules).toHaveLength(373);
+		expect(plan.rules[0]).toEqual(rule);
 		expect(readFileSync(previous).equals(before)).toBe(true);
 		for (const [name, change] of [
 			[
@@ -964,6 +969,9 @@ describe("native lifecycle plans", () => {
 				{ abortMultipartUploadsTransition: { condition: { type: "Age", maxAge: 1 } } },
 			],
 			["object-deletion", { deleteObjectsTransition: { condition: { type: "Age", maxAge: 1 } } }],
+			["extra-condition", { conditions: { ...conditions, extra: true } }],
+			["missing-conditions", { conditions: undefined }],
+			["null-conditions", { conditions: null }],
 		]) {
 			const path = output(`${name}.json`);
 			writeFileSync(path, json({ rules: [{ ...rule, ...change }] }), { mode: 0o600 });
@@ -976,6 +984,7 @@ describe("native lifecycle plans", () => {
 					})
 				).status,
 			).toBe("failed");
+			expect(existsSync(output(`${name}-plan.json`))).toBe(false);
 		}
 		const empty = output("empty-readback.json");
 		writeFileSync(empty, json({ rules: [] }), { mode: 0o600 });
@@ -989,6 +998,8 @@ describe("native lifecycle plans", () => {
 			status: "failed",
 			reason: "multipart_default_readback_required",
 		});
+		expect(wireMock).not.toHaveBeenCalled();
+		expect(fetchMock).not.toHaveBeenCalled();
 	});
 
 	it.each(["symlink", "hardlink", "public mode"])(

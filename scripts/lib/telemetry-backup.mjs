@@ -119,14 +119,17 @@ function lifecyclePlan(anchor, previous) {
 		);
 		requireValue(!ids.has(rule.id), "duplicate_lifecycle_rule");
 		ids.add(rule.id);
-		if (rule.conditions?.prefix === "") {
+		if (
+			isDeepStrictEqual(rule.conditions, {}) ||
+			isDeepStrictEqual(rule.conditions, { prefix: "" })
+		) {
 			requireValue(
 				!multipart &&
 					!rule.id.startsWith("telemetry-v1-") &&
 					isDeepStrictEqual(rule, {
 						id: rule.id,
 						enabled: true,
-						conditions: { prefix: "" },
+						conditions: rule.conditions,
 						abortMultipartUploadsTransition: { condition: { type: "Age", maxAge: 604_800 } },
 					}),
 				"lifecycle_rule_conflict",
