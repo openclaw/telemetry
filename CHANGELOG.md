@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Keep offline exports outside their executing source checkout, linked worktrees, and input archives, including differently cased paths on case-insensitive filesystems.
 - Remove the public statistics dashboard and `/api/stats` endpoint while preserving the privacy page, update checks, analytics recording, and data retention.
 
 **Highlights:** Public update checks with optional feature statistics and no stored install identifiers.

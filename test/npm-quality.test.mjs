@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
+	existsSync,
 	mkdtempSync,
 	mkdirSync,
 	readFileSync,
@@ -16,9 +17,10 @@ import https from "node:https";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { runNpmQuality } from "../scripts/lib/npm-quality.mjs";
+import { privateExportCheckouts } from "./helpers/private-export-checkouts.mjs";
 
 const CLI = fileURLToPath(new URL("../scripts/npm-quality.mjs", import.meta.url));
 const AT = "2026-09-07T04:54:09.343Z";
@@ -1195,6 +1197,55 @@ describe("manifest and resource boundaries", () => {
 });
 
 describe("offline filesystem and CLI contract", () => {
+	it.each(["source", "linked"])("protects every checkout when running from %s", async (executing) => {
+		const checkouts = privateExportCheckouts();
+		owned.push(checkouts.root);
+		const { runNpmQuality: runExport } = await import(
+			pathToFileURL(join(checkouts[executing], "scripts/lib/npm-quality.mjs"))
+		);
+		const files = save();
+		for (const checkout of [
+			checkouts.source, checkouts.linked,
+			checkouts.source.toUpperCase(), checkouts.linked.toUpperCase(),
+		].filter(existsSync)) {
+			for (const parent of [checkout, join(checkout, "nested-repository")]) {
+				files.output = join(parent, "results");
+				expect(() => runExport(files)).toThrow(/outside telemetry source checkouts/);
+				expect(existsSync(files.output)).toBe(false);
+			}
+		}
+		for (const parent of [checkouts.root, checkouts.unrelated]) {
+			files.output = join(parent, "results");
+			expect(runExport(files).summary.identities).toBe(1);
+			expect(statSync(files.output).mode & 0o777).toBe(0o700);
+			for (const name of readdirSync(files.output)) {
+				expect(statSync(join(files.output, name)).mode & 0o777).toBe(0o600);
+			}
+		}
+	});
+
+	it("preserves the archive boundary with filesystem case semantics", () => {
+		const files = save();
+		const alias = join(dirname(files.archive), "ARCHIVE");
+		const shared = existsSync(alias);
+		if (!shared) mkdirSync(alias);
+		files.output = join(alias, "results");
+		if (shared) {
+			expect(() => runNpmQuality(files)).toThrow(/outside the input archive/);
+			expect(existsSync(files.output)).toBe(false);
+		} else {
+			expect(runNpmQuality(files).summary.identities).toBe(1);
+		}
+	});
+
+	it("rejects results inside the executing source checkout before creating files", () => {
+		const files = save();
+		files.output = join(dirname(dirname(CLI)), `npm-quality-test-${digest(files.dir).slice(0, 16)}`);
+		owned.push(files.output);
+		expect(() => runNpmQuality(files)).toThrow(/outside telemetry source checkouts/);
+		expect(existsSync(files.output)).toBe(false);
+	});
+
 	it("writes exact-byte digests and exclusive private outputs without network access", () => {
 		const files = save();
 		const forbidden = vi.fn(() => {
@@ -1250,7 +1301,9 @@ describe("offline filesystem and CLI contract", () => {
 				symlinkSync(files.dir, join(files.dir, "linked"));
 				files.output = join(files.dir, "linked", "result");
 			} else symlinkSync(files.archive, files.output);
-			expect(() => runNpmQuality(files)).toThrow(/symlink|already exists/);
+			expect(() => runNpmQuality(files)).toThrow(
+				kind === "output" ? /outside the input archive/ : /symlink|already exists/,
+			);
 			expect(readdirSync(files.archive)).not.toContain("quality.json");
 		},
 	);

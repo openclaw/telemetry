@@ -16,9 +16,10 @@ import {
 import net from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { runTelemetryHistory } from "../scripts/lib/telemetry-history.mjs";
+import { privateExportCheckouts } from "./helpers/private-export-checkouts.mjs";
 
 const CLI = fileURLToPath(new URL("../scripts/telemetry-history.mjs", import.meta.url));
 const HOUR = 3_600_000;
@@ -513,6 +514,56 @@ describe("capture validation", () => {
 });
 
 describe("offline private output and CLI", () => {
+	it.each(["source", "linked"])("protects every checkout when running from %s", async (executing) => {
+		const checkouts = privateExportCheckouts();
+		owned.push(checkouts.root);
+		const { runTelemetryHistory: runExport } = await import(
+			pathToFileURL(join(checkouts[executing], "scripts/lib/telemetry-history.mjs"))
+		);
+		const files = save();
+		for (const checkout of [
+			checkouts.source, checkouts.linked,
+			checkouts.source.toUpperCase(), checkouts.linked.toUpperCase(),
+		].filter(existsSync)) {
+			for (const parent of [checkout, join(checkout, "nested-repository")]) {
+				files.output = join(parent, "results");
+				expect(() => runExport(files)).toThrow(/outside telemetry source checkouts/);
+				expect(existsSync(files.output)).toBe(false);
+			}
+		}
+		for (const parent of [checkouts.root, checkouts.unrelated]) {
+			files.output = join(parent, "results");
+			expect(runExport(files).status).toBe("written");
+			expect(runExport(files).status).toBe("unchanged");
+			expect(statSync(files.output).mode & 0o777).toBe(0o700);
+			for (const name of readdirSync(files.output)) {
+				expect(statSync(join(files.output, name)).mode & 0o777).toBe(0o600);
+			}
+		}
+	});
+
+	it("preserves the archive boundary with filesystem case semantics", () => {
+		const files = save();
+		const alias = join(dirname(files.archive), "ARCHIVE");
+		const shared = existsSync(alias);
+		if (!shared) mkdirSync(alias);
+		files.output = join(alias, "results");
+		if (shared) {
+			expect(() => runTelemetryHistory(files)).toThrow(/outside the input archive/);
+			expect(existsSync(files.output)).toBe(false);
+		} else {
+			expect(runTelemetryHistory(files).status).toBe("written");
+		}
+	});
+
+	it("rejects results inside the executing source checkout before creating files", () => {
+		const files = save();
+		files.output = join(dirname(dirname(CLI)), `telemetry-history-test-${digest(files.root).slice(0, 16)}`);
+		owned.push(files.output);
+		expect(() => runTelemetryHistory(files)).toThrow(/outside telemetry source checkouts/);
+		expect(existsSync(files.output)).toBe(false);
+	});
+
 	it("writes deterministic private artifacts, omits freeform metadata, and verifies idempotent reuse", () => {
 		const files = save();
 		const forbidden = vi.fn(() => {
