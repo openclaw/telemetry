@@ -2,7 +2,12 @@
 
 ## Unreleased
 
-**Highlights:** Public update checks and seven-day usage aggregates, with optional feature statistics and no stored install identifiers.
+- Reject aggregate capture outputs inside telemetry source checkouts before credentials, requests, or writes; keep offline verification scratch outside bundles and all linked checkouts using physical directory identity.
+- Keep offline exports outside their executing source checkout, linked worktrees, and input archives, including differently cased paths on case-insensitive filesystems.
+- Remove the public statistics dashboard and `/api/stats` endpoint while preserving the privacy page, update checks, analytics recording, and data retention.
+- Add a bounded, manual Worker-health CLI with hourly adaptive request and error estimates, strict incomplete-data handling, and an operator runbook. No client collection or Worker runtime settings change.
+
+**Highlights:** Public update checks with optional feature statistics and no stored install identifiers.
 
 - Add an operator-invoked, dry-run-default aggregate capture pilot for one closed UTC day: hourly Analytics Engine reports and separate HTTP country estimates in a private, exclusively created bundle with offline verification. No scheduled backup, upload, raw-event restoration, storage provisioning, or retention change.
 - Export one hash-pinned archived hourly Analytics Engine query to private daily JSON, CSV, and provenance/coverage artifacts. Preserve exact sampled report counts, flag partial days and missing hours, and restrict comparison totals to complete closed UTC days. No raw-event restoration, live queries, or backup job.

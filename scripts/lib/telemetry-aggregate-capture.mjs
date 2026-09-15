@@ -14,8 +14,9 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
+import { dirname, join, parse, relative, resolve, sep } from "node:path";
 import { TextDecoder } from "node:util";
+import { isTelemetryCheckoutPath, isWithinDirectory } from "./private-export-path.mjs";
 import { runTelemetryHistory } from "./telemetry-history.mjs";
 
 const DAY = 86_400_000;
@@ -658,10 +659,13 @@ function verifyBundle(bundle, spec, requestBodies, completed) {
 	};
 	// The unchanged exporter writes only to our scratch, never into the saved archive.
 	const scratchParent = realDirectory(realpathSync(tmpdir()));
-	const rel = relative(bundle.root, scratchParent);
 	requireValue(
-		rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel),
+		!isWithinDirectory(scratchParent, bundle.root),
 		"verification scratch must be outside the bundle",
+	);
+	requireValue(
+		!isTelemetryCheckoutPath(scratchParent),
+		"verification scratch must be outside telemetry source checkouts",
 	);
 	const scratch = mkdtempSync(join(scratchParent, "telemetry-capture-verify-"));
 	const claimed = lstatSync(scratch);
@@ -759,6 +763,10 @@ export async function runTelemetryAggregateCapture({
 		noTraversal(output);
 		const root = resolve(output);
 		realDirectory(dirname(root));
+		requireValue(
+			!isTelemetryCheckoutPath(root),
+			"output must be outside telemetry source checkouts",
+		);
 		const spec = plan(day, window, accountId, zoneId);
 		const requestBodies = requests(window, zoneId);
 		let exists = false;

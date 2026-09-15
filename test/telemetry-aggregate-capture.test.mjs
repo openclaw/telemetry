@@ -16,10 +16,11 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runTelemetryAggregateCapture } from "../scripts/lib/telemetry-aggregate-capture.mjs";
 import { runTelemetryHistory } from "../scripts/lib/telemetry-history.mjs";
+import { privateExportCheckouts } from "./helpers/private-export-checkouts.mjs";
 
 const CLI = fileURLToPath(new URL("../scripts/telemetry-aggregate-capture.mjs", import.meta.url));
 const DAY = "2025-02-03";
@@ -189,6 +190,64 @@ afterEach(() => {
 });
 
 describe("planning and exclusive capture", () => {
+	it.each(["source", "linked"])(
+		"protects every checkout when running from %s",
+		async (executing) => {
+			const checkouts = privateExportCheckouts();
+			owned.push(checkouts.root);
+			const { runTelemetryAggregateCapture: runCapture } = await import(
+				pathToFileURL(join(checkouts[executing], "scripts/lib/telemetry-aggregate-capture.mjs"))
+			);
+			const opts = options();
+			const parents = [
+				checkouts.source,
+				checkouts.linked,
+				checkouts.source.toUpperCase(),
+				checkouts.linked.toUpperCase(),
+			]
+				.filter(existsSync)
+				.flatMap((checkout) => [checkout, join(checkout, "nested-repository")]);
+			const original = snapshot(checkouts.root);
+			forbidCredentials();
+			for (const parent of parents) {
+				const output = join(parent, "results");
+				await expect(runCapture({ ...opts, output, execute: false })).resolves.toMatchObject({
+					status: "planned",
+				});
+				for (const destination of [output, parent]) {
+					await expect(runCapture({ ...opts, output: destination })).rejects.toThrow(
+						/output must be outside telemetry source checkouts/,
+					);
+				}
+				expect(existsSync(output)).toBe(false);
+			}
+			expect(fetchMock).not.toHaveBeenCalled();
+			expect(snapshot(checkouts.root)).toEqual(original);
+			vi.unstubAllGlobals();
+			for (const parent of [checkouts.root, checkouts.unrelated]) {
+				opts.output = join(parent, "results");
+				transport();
+				await expect(runCapture(opts)).resolves.toMatchObject({ status: "written" });
+				fetchMock.mockClear();
+				forbidCredentials();
+				await expect(runCapture(opts)).resolves.toMatchObject({ status: "unchanged" });
+				expect(fetchMock).not.toHaveBeenCalled();
+				vi.unstubAllGlobals();
+			}
+			const captured = snapshot(checkouts.root);
+			for (const parent of parents) {
+				vi.stubEnv("TMPDIR", parent);
+				forbidCredentials();
+				await expect(runCapture(opts)).rejects.toThrow(
+					/verification scratch must be outside telemetry source checkouts/,
+				);
+				expect(snapshot(checkouts.root)).toEqual(captured);
+				vi.unstubAllGlobals();
+			}
+			expect(fetchMock).not.toHaveBeenCalled();
+		},
+	);
+
 	it("defaults to a closed-day plan without reading credentials, touching output, or requesting data", async () => {
 		const opts = options();
 		opts.output = join(opts.output, "missing-parent", "result");
@@ -493,9 +552,13 @@ describe("offline immutable bundle verification", () => {
 		await runTelemetryAggregateCapture(opts);
 		const original = snapshot(opts.output);
 		fetchMock.mockClear();
-		vi.stubEnv("TMPDIR", opts.output);
-		await expect(runTelemetryAggregateCapture(opts)).rejects.toThrow(/scratch/);
-		expect(snapshot(opts.output)).toEqual(original);
+		for (const scratch of [opts.output, opts.output.toUpperCase()].filter(existsSync)) {
+			vi.stubEnv("TMPDIR", scratch);
+			forbidCredentials();
+			await expect(runTelemetryAggregateCapture(opts)).rejects.toThrow(/scratch/);
+			expect(snapshot(opts.output)).toEqual(original);
+			vi.unstubAllGlobals();
+		}
 		expect(fetchMock).not.toHaveBeenCalled();
 	});
 });

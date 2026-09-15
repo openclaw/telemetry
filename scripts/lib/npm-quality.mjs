@@ -11,6 +11,7 @@ import {
 } from "node:fs";
 import { dirname, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
 import { TextDecoder } from "node:util";
+import { isTelemetryCheckoutPath, isWithinDirectory } from "./private-export-path.mjs";
 
 const DAY = 86_400_000;
 const SHA = /^[a-f0-9]{64}$/u;
@@ -1031,11 +1032,8 @@ function writeOutputs(output, files, inputRoot) {
 	noTraversal(output);
 	const absolute = resolve(output);
 	const parent = realDirectory(dirname(absolute));
-	const rel = relative(inputRoot, absolute);
-	requireValue(
-		rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel),
-		"output must be outside the input archive",
-	);
+	requireValue(!isTelemetryCheckoutPath(absolute), "output must be outside telemetry source checkouts");
+	requireValue(!isWithinDirectory(absolute, inputRoot), "output must be outside the input archive");
 	mkdirSync(absolute, { mode: 0o700 });
 	const claimed = lstatSync(absolute);
 	requireValue(
