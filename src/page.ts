@@ -1,8 +1,4 @@
-/**
- * The public face of this service. It exists so that "here is exactly what we
- * collect" is something a visitor can read in ten seconds, and so the numbers
- * we collect are given back to the community that sent them.
- */
+/** Explains collection and opt-out controls without exposing usage aggregates. */
 export function renderHomePage(): string {
 	return `<!doctype html>
 <html lang="en">
@@ -26,28 +22,21 @@ pre code { background: none; padding: 0; }
 table { border-collapse: collapse; width: 100%; font-size: .95rem; }
 th, td { text-align: left; padding: .5rem .6rem; border-bottom: 1px solid var(--line); vertical-align: top; }
 th { color: var(--muted); font-weight: 600; }
+td code { overflow-wrap: anywhere; }
 a { color: var(--accent); }
 .never li { margin: .2rem 0; }
 footer { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--line); color: var(--muted); font-size: .9rem; }
-.stats-grid table { table-layout: fixed; }
-.stats-grid th:first-child, .stats-grid td:first-child { width: 65%; overflow-wrap: anywhere; }
-.stats-grid th:last-child, .stats-grid td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
-.stats-grid { display: grid; gap: 2rem; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); }
-.stats-grid h3 { font-size: 1rem; margin-bottom: .4rem; }
-.stats-grid p { font-size: .85rem; overflow-wrap: anywhere; }
-[hidden] { display: none !important; }
-.muted { color: var(--muted); }
 </style>
 </head>
 <body>
 <main>
 <h1>OpenClaw telemetry</h1>
-<p class="lede">This service answers the daily update check that OpenClaw installs make, and records anonymous aggregates from it. Everything it does is in <a href="https://github.com/openclaw/telemetry">this repository</a>.</p>
+<p class="lede">This service answers the daily update check that OpenClaw installs make. Everything it does is in <a href="https://github.com/openclaw/telemetry">this repository</a>.</p>
 
 <h2>What an install sends</h2>
 <p>With automatic update checks enabled, a successful version check is reused for 24 hours. The request carries a User-Agent:</p>
 <pre><code>openclaw/2026.8.2 (darwin; node/v26.0.1; arm64; gateway)</code></pre>
-<p>Feature statistics are off by default. Operators can enable them during interactive setup, with <code>openclaw telemetry on</code>, or with <code>telemetry.enabled: true</code>. When enabled, the same request carries a small body of feature facts:</p>
+<p>Anonymous feature statistics are off by default. Operators can enable them during interactive setup, with <code>openclaw telemetry on</code>, or with <code>telemetry.enabled: true</code>. When enabled, the same request carries a small body of feature facts:</p>
 <pre><code>{
   "schema": 1,
   "version": "2026.8.2",
@@ -65,104 +54,35 @@ footer { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--line
 <p>Interactive setup defaults to <strong>No thanks</strong>; guided Quick Start skips the question. Scripted installs do not opt in automatically. The enabled setting controls inclusion, not whether a prompt was answered.</p>
 <p>Channels and providers describe configuration; plugins describe enabled inventory, not invocations. <code>sessionsLast24h</code> counts retained session-creation events timestamped in the preceding 24 hours, not active sessions or messages. Missing or unreadable local state produces zero.</p>
 
+<h2>Approximate location</h2>
+<p>Cloudflare provides approximate location: country, region code, city, and timezone. We store no raw IP addresses or precise coordinates in analytics.</p>
+<p>Recorded update checks include these fields even when anonymous feature statistics are off or <code>DO_NOT_TRACK</code> is set. Missing or invalid fields stay empty. Records are retained for three months.</p>
+
 <h2>What we exclude from Analytics Engine</h2>
 <ul class="never">
 <li>Message content, prompts, model output, file contents, or file paths</li>
 <li>Credentials, tokens, or secret references</li>
 <li>IP addresses, hostnames, usernames, or account identifiers</li>
 <li>Any install ID or device ID</li>
+<li>Coordinates, postal codes, or physical-device hardware details</li>
 </ul>
-<p>The Worker reads the client IP transiently for Cloudflare's rate limiter, but does not write it to Analytics Engine. Worker observability, logs, and invocation logs are disabled in the deployment configuration.</p>
-<p>Cloudflare handles TLS and network requests and sees client IP addresses. Its separate infrastructure-level processing is not described or controlled by these Worker logging settings.</p>
+<p>Reports contain no user, account, install, or device identifier. Cloudflare processes connection IP addresses, and the Worker uses them transiently for rate limiting without storing them in Analytics Engine. Worker logs are disabled; Cloudflare's separate infrastructure processing is outside those settings.</p>
 
 <h2>How to turn it off</h2>
 <table>
 <tr><th>Command or setting</th><th>Effect</th></tr>
-<tr><td><code>openclaw telemetry off</code></td><td>Stops the feature-stats body. Update checks continue.</td></tr>
+<tr><td><code>openclaw telemetry off</code></td><td>Stops anonymous feature statistics. Update checks continue.</td></tr>
 <tr><td><code>DO_NOT_TRACK=1</code></td><td>Same, enforced from the environment.</td></tr>
 <tr><td><code>update.checkOnStart: false</code></td><td>Stops both tiers of automatic update requests. Explicit updates and other configured services are separate.</td></tr>
 </table>
 <p><code>OPENCLAW_NO_AUTO_UPDATE=1</code> also prevents automatic update requests. A truthy <code>CI</code> suppresses both tiers unless a replacement <code>OPENCLAW_TELEMETRY_ENDPOINT</code> is explicitly configured.</p>
-<p><code>openclaw telemetry show</code> displays policy and a CLI-built payload preview, not the exact next Gateway payload. Registry state and collection time can differ. If policy disables requests, it shows <code>Request: none</code>.</p>
-
-<h2>What we learn</h2>
-<p>Counts are weighted report estimates, not unique installations or users. Configuration and inventory do not measure feature use. Repeated reports can count again.</p>
-<p class="muted" id="stats-status">Loading aggregates…</p>
-<div id="stats-summary" hidden>
-  <p id="stats-window"></p>
-  <p id="stats-totals"></p>
-  <p class="muted" id="stats-watermarks"></p>
-  <p class="muted" id="stats-generated"></p>
-</div>
-<div class="stats-grid" id="stats" hidden>
-  <div><h3>Versions</h3><table><thead><tr><th>Version</th><th>Reports</th></tr></thead><tbody id="versions"></tbody></table></div>
-  <div><h3>Platforms</h3><table><thead><tr><th>Platform</th><th>Reports</th></tr></thead><tbody id="platforms"></tbody></table></div>
-  <div><h3>Configured channels</h3><p class="muted" id="channels-meta"></p><table><thead><tr><th>Channel</th><th>Reports</th></tr></thead><tbody id="channels"></tbody></table></div>
-  <div><h3>Configured providers</h3><p class="muted" id="providers-meta"></p><table><thead><tr><th>Provider</th><th>Reports</th></tr></thead><tbody id="providers"></tbody></table></div>
-  <div><h3>Plugin inventory</h3><p class="muted" id="plugins-meta"></p><table><thead><tr><th>Plugin</th><th>Reports</th></tr></thead><tbody id="plugins"></tbody></table></div>
-</div>
-<p class="muted">Top ten entries per table. Category queries can use different samples, so their report bases and latest event times may differ. New public-name acceptance improves coverage; it does not by itself prove increased adoption.</p>
+<p><code>openclaw telemetry show</code> displays policy and a CLI-built payload preview, not the exact next Gateway payload or server-derived location information. Registry state and collection time can differ. If policy disables requests, it shows <code>Request: none</code>. Disabling requests does not erase previously recorded rows.</p>
 
 <footer>
 Run by the OpenClaw Foundation. Source: <a href="https://github.com/openclaw/telemetry">github.com/openclaw/telemetry</a> ·
 Docs: <a href="https://docs.openclaw.ai/gateway/telemetry">docs.openclaw.ai/gateway/telemetry</a>
 </footer>
 </main>
-<script>
-(async () => {
-  const status = document.getElementById("stats-status");
-  try {
-    const response = await fetch("/api/stats", { cache: "no-store" });
-    if (!response.ok) throw new Error("unavailable");
-    const data = await response.json();
-    const fill = (id, rows) => {
-      const tbody = document.getElementById(id);
-      tbody.innerHTML = "";
-      if (!rows.length) {
-        const tr = document.createElement("tr");
-        const empty = document.createElement("td");
-        empty.colSpan = 2;
-        empty.textContent = "No reports.";
-        tr.append(empty);
-        tbody.append(tr);
-      }
-      for (const [label, count] of rows.slice(0, 10)) {
-        const tr = document.createElement("tr");
-        const name = document.createElement("td");
-        name.textContent = label;
-        const value = document.createElement("td");
-        value.textContent = count.toLocaleString();
-        tr.append(name, value);
-        tbody.append(tr);
-      }
-    };
-    fill("versions", data.versions.map((row) => [row.version, row.pings]));
-    fill("platforms", data.platforms.map((row) => [row.platform, row.pings]));
-    fill("channels", data.channels.map((row) => [row.channel, row.reports]));
-    fill("providers", data.providerFamilies.map((row) => [row.provider, row.reports]));
-    fill("plugins", data.plugins.map((row) => [row.plugin, row.reports]));
-    const date = (value) => value === null ? "none in this window" : new Date(value).toUTCString();
-    for (const [id, key] of [["channels", "channels"], ["providers", "providerFamilies"], ["plugins", "plugins"]]) {
-      const metadata = data.featureMetadata[key];
-      document.getElementById(id + "-meta").textContent =
-        metadata.featureReports.toLocaleString() + " feature reports in this category sample. Latest event: " + date(metadata.latestFeatureEventAt) + ".";
-    }
-    status.textContent = data.summary.totalPings === 0 ? "No update reports in this window." : "Seven-day report estimates.";
-    document.getElementById("stats-window").textContent =
-      "Window: " + date(data.windowStart) + " (inclusive) to " + date(data.windowEnd) + " (exclusive).";
-    document.getElementById("stats-totals").textContent =
-      data.summary.totalPings.toLocaleString() + " update reports; " + data.summary.featureReports.toLocaleString() + " with feature statistics in the summary sample.";
-    document.getElementById("stats-watermarks").textContent =
-      "Latest recorded event: " + date(data.summary.latestEventAt) + ". Latest feature event: " + date(data.summary.latestFeatureEventAt) + ".";
-    document.getElementById("stats-generated").textContent =
-      "Response generated: " + date(data.generatedAt) + ". Cached for up to ten minutes; generation time is not the latest event time.";
-    document.getElementById("stats-summary").hidden = false;
-    document.getElementById("stats").hidden = false;
-  } catch {
-    status.textContent = "Aggregates are not available right now.";
-  }
-})();
-</script>
 </body>
 </html>`;
 }
