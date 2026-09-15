@@ -4,6 +4,7 @@
 
 - Keep offline exports outside their executing source checkout, linked worktrees, and input archives, including differently cased paths on case-insensitive filesystems.
 - Remove the public statistics dashboard and `/api/stats` endpoint while preserving the privacy page, update checks, analytics recording, and data retention.
+- Add a bounded, manual Worker-health CLI with hourly adaptive request and error estimates, strict incomplete-data handling, and an operator runbook. No client collection or Worker runtime settings change.
 
 **Highlights:** Public update checks with optional feature statistics and no stored install identifiers.
 

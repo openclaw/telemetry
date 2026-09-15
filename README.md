@@ -201,6 +201,13 @@ Deploys run from GitHub Actions on pushes to `main` (see
 [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)), using the `CLOUDFLARE_API_TOKEN`
 repository secret.
 
+### Worker health
+
+With existing Cloudflare read credentials in the environment, `npm run --silent worker:health`
+requests one bounded, hourly Worker-health aggregate. See the [operator runbook](docs/worker-health.md)
+for access requirements, request limits, output handling, and interpretation. This is separate from
+public feature telemetry and does not verify Analytics Engine delivery.
+
 ### Updating public names
 
 [`data/public-vocabulary.json`](data/public-vocabulary.json) records immutable OpenClaw revisions,
