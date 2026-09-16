@@ -52,8 +52,8 @@ carries a small JSON body:
 Interactive setup defaults to **No thanks**; guided Quick Start skips that prompt. Scripted installs
 do not opt in automatically. The enabled setting, not a recorded prompt response, controls inclusion.
 The server limits bodies containing anonymous feature statistics to 16 KiB while reading
-the upload. Oversized or malformed bodies are discarded, and the request still receives its
-version answer.
+the upload. Oversized or malformed bodies, including invalid UTF-8, are discarded, and the request
+still receives its version answer.
 
 <a id="cloudflare-derived-request-geography"></a>
 
