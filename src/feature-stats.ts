@@ -44,7 +44,11 @@ async function readCappedText(request: Request): Promise<string | undefined> {
 		bytes.set(chunk, offset);
 		offset += chunk.byteLength;
 	}
-	return new TextDecoder().decode(bytes);
+	try {
+		return new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(bytes);
+	} catch {
+		return undefined;
+	}
 }
 
 export async function readFeatureStats(request: Request) {

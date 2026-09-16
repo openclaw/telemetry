@@ -117,4 +117,24 @@ describe("update checks over workerd HTTP", () => {
 		expect(update.status).toBe(200);
 		await expect(update.json()).resolves.toEqual({ version: "2026.8.2" });
 	}, 30_000);
+
+	it("drops malformed UTF-8 feature bodies while serving updates over HTTP", async () => {
+		await start(recordingScript);
+		const origin = await runtime.ready;
+		const response = await fetch(new URL("/api/latest-version", origin), {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: Buffer.concat([
+				Buffer.from('{"schema":1,"features":{"plugins":["codex"],"pluginsEnabled":7},"ignored":"'),
+				Buffer.from([0xff]),
+				Buffer.from('"}'),
+			]),
+		});
+		expect(response.status).toBe(200);
+		const result = await response.json();
+		expect(result.status).toBe(200);
+		expect(result.body).toEqual({ version: "2026.8.2" });
+		expect(result.point.doubles).toEqual([0, 0, 0]);
+		expect(result.point.blobs.slice(5, 8)).toEqual(["", "", ""]);
+	}, 30_000);
 });

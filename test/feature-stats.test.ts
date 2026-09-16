@@ -54,6 +54,40 @@ describe("readFeatureStats", () => {
 		});
 	});
 
+	it.each([
+		{ label: "invalid leading byte", invalid: [0xff] },
+		{ label: "overlong encoding", invalid: [0xc0, 0xaf] },
+		{ label: "incomplete sequence", invalid: [0xe2, 0x82] },
+		{ label: "encoded surrogate", invalid: [0xed, 0xa0, 0x80] },
+	])("discards malformed UTF-8 without repairing the payload: $label", async ({ invalid }) => {
+		const encoder = new TextEncoder();
+		const body = new Uint8Array([
+			...encoder.encode(FEATURE_BODY.slice(0, -1) + ',"ignored":"'),
+			...invalid,
+			...encoder.encode('"}'),
+		]);
+		const request = new Request("https://telemetry.example/api/latest-version", {
+			method: "POST",
+			body,
+		});
+		await expect(readFeatureStats(request)).resolves.toBeUndefined();
+	});
+
+	it("accepts valid UTF-8 split across upload chunks", async () => {
+		const bytes = new TextEncoder().encode(FEATURE_BODY.slice(0, -1) + ',"ignored":"東京�"}');
+		const body = new ReadableStream<Uint8Array>({
+			start(controller) {
+				for (const byte of bytes) controller.enqueue(new Uint8Array([byte]));
+				controller.close();
+			},
+		});
+		await expect(readFeatureStats(postStream(body))).resolves.toMatchObject({
+			channels: ["telegram"],
+			pluginsEnabled: 1,
+			sessionsLast24h: 2,
+		});
+	});
+
 	it("rejects a huge body with no Content-Length before reading the whole stream", async () => {
 		const chunkSize = 4_096;
 		const totalBytes = 1_048_576;
