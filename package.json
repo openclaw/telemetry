@@ -2,7 +2,7 @@
   "name": "@openclaw/telemetry",
   "private": true,
   "version": "1.0.0",
-  "description": "Cloudflare Worker behind the OpenClaw update check and anonymous usage aggregates",
+  "description": "Cloudflare Worker behind the OpenClaw update check and optional feature statistics",
   "license": "MIT",
   "type": "module",
   "scripts": {

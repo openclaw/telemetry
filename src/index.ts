@@ -1,4 +1,4 @@
-import { keepKnownNames, loadKnownNames, normalizeVersion } from "./allowlist.js";
+import { keepKnownNames, normalizeVersion } from "./allowlist.js";
 import { buildDataPoint } from "./analytics.js";
 import type { Env } from "./env.js";
 import { readFeatureStats } from "./feature-stats.js";
@@ -96,13 +96,12 @@ async function recordRequest(request: Request, env: Env): Promise<void> {
 
 	const identity = parseClientIdentity(request.headers.get("user-agent"));
 	const features = await readFeatureStats(request);
-	const known = features ? await loadKnownNames() : undefined;
 	const validated = features
 		? {
 				...features,
-				channels: keepKnownNames(features.channels, known),
-				providerFamilies: keepKnownNames(features.providerFamilies, known),
-				plugins: keepKnownNames(features.plugins, known),
+				channels: keepKnownNames(features.channels),
+				providerFamilies: keepKnownNames(features.providerFamilies),
+				plugins: keepKnownNames(features.plugins),
 			}
 		: undefined;
 

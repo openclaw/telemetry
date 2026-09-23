@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { keepKnownNames, loadKnownNames } from "../src/allowlist.js";
+import { keepKnownNames } from "../src/allowlist.js";
 import { buildDataPoint } from "../src/analytics.js";
 import { parseRequestGeography } from "../src/geography.js";
 import { parseClientIdentity, parseFeatureStats } from "../src/payload.js";
@@ -168,14 +168,14 @@ describe("parseFeatureStats", () => {
 		).toEqual([]);
 	});
 
-	it("preserves case-insensitive public names while excluding private and malformed tokens", async () => {
+	it("preserves case-insensitive public names while excluding private and malformed tokens", () => {
 		const parsed = parseFeatureStats({
 			schema: 1,
 			features: {
 				plugins: ["CODEX", "codex", "Browser", "acme-internal-crm", "cod ex"],
 			},
 		});
-		expect(keepKnownNames(parsed?.plugins ?? [], await loadKnownNames())).toEqual([
+		expect(keepKnownNames(parsed?.plugins ?? [])).toEqual([
 			"browser",
 			"codex",
 		]);

@@ -110,7 +110,7 @@ export async function buildSnapshot(source, revision, catalogHistoryStart) {
 	}
 }
 
-/** All admitted names remain available to ingestion and future seven-day stats. */
+/** All admitted names remain available to ingestion and offline analysis. */
 export function renderVocabulary(metadata) {
 	if (metadata.schemaVersion !== 1 || !metadata.snapshots.length) {
 		throw new Error("Public vocabulary requires at least one immutable snapshot");

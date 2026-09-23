@@ -239,14 +239,14 @@ and needs review rather than silently falling back to a partial vocabulary.
 The initial snapshot includes all catalog revisions on the public main history since commit
 `844e781ca40952c98ee997b016e3cc5d2f12f9f3`, before name allowlisting began in August 2026.
 Refreshes append snapshots; never remove older ones during routine updates. This retains removed or
-renamed public entries for the entire seven-day stats window, including names admitted by the older
+renamed public entries, including names admitted by the older
 moving-catalog implementation. New public names remain rejected until reviewed metadata is deployed.
 The vocabulary is compiled into the Worker. Loading it requires neither upstream requests nor
 Cache API access, so old allowlist cache entries cannot be reused and cache outages cannot interrupt
-name validation. Each caller receives a fresh set.
+name validation. Ingestion checks the compiled vocabulary without exposing its mutable set.
 
 Historical rows may contain mixed-case names or case-distinct duplicates from older validation.
-This repair canonicalizes new rows only; stats consumers must validate historical coverage and handle
+New rows are canonicalized; offline consumers must validate historical coverage and handle
 those rows explicitly rather than assume the stored window is already canonical.
 
 ## Offline historical export
