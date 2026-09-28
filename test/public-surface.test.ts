@@ -34,6 +34,14 @@ it.each(["/", "/index.html"])("serves privacy information without a dashboard at
 	expect(html).toContain("outcomes <strong>on by default</strong>");
 	expect(html).toContain("<code>DO_NOT_TRACK</code> controls feature statistics, not update outcomes");
 	expect(html).toContain("Nix mode suppress outcomes");
+	expect(html).toContain(
+		"a truthy <code>CI</code> always suppresses outcomes, even when a replacement <code>OPENCLAW_TELEMETRY_ENDPOINT</code> is configured",
+	);
+	expect(html).toContain(
+		"The replacement-endpoint exception applies only to daily update checks and optional feature statistics, not update outcomes",
+	);
+	expect(html).not.toContain("suppresses them unless a replacement");
+	expect(html).not.toContain("suppresses both tiers unless a replacement");
 	expect(html).toContain("before releasing the default-on client");
 	expect(html).not.toContain("/api/stats");
 	expect(html).not.toContain("Loading aggregates");
