@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Refresh Wrangler, Cloudflare Worker types, and Vitest with the matching workerd runtime and npm lockfile.
 - Discard malformed UTF-8 feature-statistics uploads instead of repairing and recording them, while preserving update responses.
 - Keep offline exports outside their executing source checkout, linked worktrees, and input archives, including differently cased paths on case-insensitive filesystems.
 - Remove the public statistics dashboard and `/api/stats` endpoint while preserving the privacy page, update checks, analytics recording, and data retention.
