@@ -54,6 +54,9 @@ footer { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--line
 <p>Interactive setup defaults to <strong>No thanks</strong>; guided Quick Start skips the question. Scripted installs do not opt in automatically. The enabled setting controls inclusion, not whether a prompt was answered.</p>
 <p>Channels and providers describe configuration; plugins describe enabled inventory, not invocations. <code>sessionsLast24h</code> counts retained session-creation events timestamped in the preceding 24 hours, not active sessions or messages. Missing or unreadable local state produces zero.</p>
 
+<h2>Update outcomes</h2>
+<p>The receiver also supports identifier-free terminal update outcomes from a companion client implementation. These use a separate dataset, strict public version labels and bounded outcome categories, with no geography, install IDs, raw errors or logs. Uploads are limited to 4096 bytes. Reports are retained for three months; no public individual-report route is provided. The companion client reports outcomes <strong>on by default</strong>, like the existing update ping, under update-request policy rather than optional feature-statistics consent. <code>update.checkOnStart: false</code>, <code>OPENCLAW_NO_AUTO_UPDATE=1</code>, and Nix mode suppress outcomes; a truthy <code>CI</code> always suppresses outcomes, even when a replacement <code>OPENCLAW_TELEMETRY_ENDPOINT</code> is configured. <code>DO_NOT_TRACK</code> controls feature statistics, not update outcomes. Receiver support does not itself enable client reporting: deploy and verify the receiver and separate dataset before releasing the default-on client, under separately authorized rollout. See the <a href="https://github.com/openclaw/telemetry/blob/main/docs/update-results.md">outcome contract and collection boundaries</a>.</p>
+
 <h2>Approximate location</h2>
 <p>Cloudflare provides approximate location: country, region code, city, and timezone. We store no raw IP addresses or precise coordinates in analytics.</p>
 <p>Recorded update checks include these fields even when anonymous feature statistics are off or <code>DO_NOT_TRACK</code> is set. Missing or invalid fields stay empty. Records are retained for three months.</p>
@@ -71,11 +74,11 @@ footer { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--line
 <h2>How to turn it off</h2>
 <table>
 <tr><th>Command or setting</th><th>Effect</th></tr>
-<tr><td><code>openclaw telemetry off</code></td><td>Stops anonymous feature statistics. Update checks continue.</td></tr>
+<tr><td><code>openclaw telemetry off</code></td><td>Stops anonymous feature statistics. Update checks and default-on outcomes continue.</td></tr>
 <tr><td><code>DO_NOT_TRACK=1</code></td><td>Same, enforced from the environment.</td></tr>
-<tr><td><code>update.checkOnStart: false</code></td><td>Stops both tiers of automatic update requests. Explicit updates and other configured services are separate.</td></tr>
+<tr><td><code>update.checkOnStart: false</code></td><td>Stops automatic update requests and outcome reporting. Explicit updates and other configured services are separate.</td></tr>
 </table>
-<p><code>OPENCLAW_NO_AUTO_UPDATE=1</code> also prevents automatic update requests. A truthy <code>CI</code> suppresses both tiers unless a replacement <code>OPENCLAW_TELEMETRY_ENDPOINT</code> is explicitly configured.</p>
+<p><code>OPENCLAW_NO_AUTO_UPDATE=1</code> also prevents automatic update requests. A truthy <code>CI</code> suppresses daily update checks and optional feature statistics unless a replacement <code>OPENCLAW_TELEMETRY_ENDPOINT</code> is explicitly configured. The replacement-endpoint exception applies only to daily update checks and optional feature statistics, not update outcomes.</p>
 <p><code>openclaw telemetry show</code> displays policy and a CLI-built payload preview, not the exact next Gateway payload or server-derived location information. Registry state and collection time can differ. If policy disables requests, it shows <code>Request: none</code>. Disabling requests does not erase previously recorded rows.</p>
 
 <footer>

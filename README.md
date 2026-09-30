@@ -12,7 +12,33 @@ written from a validated request.
 | Route | Purpose |
 | --- | --- |
 | `GET \| POST /api/latest-version` | Returns `{ version, note? }`. `version` is the latest published OpenClaw release (looked up from the npm registry and cached at the edge for 5 minutes). `note` is an optional short message shown in the operator's terminal, used only when a release is worth acting on immediately. |
+| `HEAD /api/latest-version` | Outcome capability only: empty 204 with `OpenClaw-Update-Results: 2` when its separate binding is present; otherwise empty 503 without that header. Always `Cache-Control: no-store`; no analytics, quota consumption or version lookup. |
 | `GET /` | Human-readable page: what is collected, how to turn it off, without a public statistics dashboard. |
+
+## Identifier-free update outcomes
+
+The same POST endpoint also accepts a strict schema-2 `update_result` event from
+a companion client implementation. These outcome reports use a **separate dataset**
+and never include geography or daily feature/identity rows. All fields are required
+public labels; unknown keys, invalid labels, malformed UTF-8 and bodies over 4096
+bytes are rejected. This receiver change does not enable a client or deploy collection.
+See [the wire contract, storage columns, retention and private aggregate SQL](docs/update-results.md).
+The companion client reports outcomes **on by default**, like the existing update
+ping, under update-request policy rather than optional feature-statistics consent.
+`update.checkOnStart: false`, `OPENCLAW_NO_AUTO_UPDATE=1`, and Nix mode suppress
+outcomes. A truthy `CI` always suppresses outcomes, including when a replacement
+`OPENCLAW_TELEMETRY_ENDPOINT` is explicitly configured. `DO_NOT_TRACK` and
+`openclaw telemetry off` control feature statistics, not update outcomes. Feature
+statistics remain off by default. Deploy and verify this receiver and its separate
+dataset **before releasing the default-on client**, under separately authorized
+rollout. The default production configuration intentionally omits `UPDATE_RESULTS`,
+so the existing main-push deployment cannot implicitly activate outcome collection.
+Outcome attempts HEAD the same full configured endpoint and POST only after exact
+204 plus `OpenClaw-Update-Results: 2`; old receivers (405) and unconfigured receivers
+(503) never receive the outcome payload. Binding presence is capability, not proof
+of production delivery. The daily GET and opt-in schema-1 POST remain single requests.
+See the contract for the shared timeout, no-redirect and opt-out recheck requirements.
+The daily-check behavior described below is unchanged.
 
 ## What an install sends
 
@@ -72,7 +98,7 @@ each field; missing or invalid values are left empty without discarding valid fi
 
 ## What is stored
 
-Each recorded request contributes one Analytics Engine data point with these columns and no others:
+Each recorded daily update check contributes one Analytics Engine data point with these columns and no others (schema-2 outcome storage is documented separately above):
 
 | Column | Value |
 | --- | --- |
@@ -99,7 +125,7 @@ enablement. The session count depends on creation events still retained in a bou
 Missing or unreadable state produces zero; this is not active sessions, messages, or all sessions
 that existed that day.
 
-Unknown keys in a request body are dropped rather than stored, so a future client cannot silently
+Unknown keys in a schema-1 request body are dropped rather than stored, so a future client cannot silently
 widen what this service keeps. User-Agents longer than 512 characters become an unknown identity
 before parsing. Identity fields remain length-bounded and character-filtered. Feature IDs must be
 complete identifiers of at most 64 characters; malformed or overlength IDs are dropped, never
@@ -169,12 +195,13 @@ processing is outside those settings.
 
 | Command or setting | Effect |
 | --- | --- |
-| `openclaw telemetry off` | Stops anonymous feature statistics. Update checks continue. |
+| `openclaw telemetry off` | Stops anonymous feature statistics. Update checks and default-on outcomes continue. |
 | `DO_NOT_TRACK=1` | Same, enforced from the environment. |
-| `update.checkOnStart: false` | Stops both tiers of automatic update requests. Explicit update commands and other configured services are separate. |
+| `update.checkOnStart: false` | Stops automatic update requests and outcome reporting. Explicit update commands and other configured services are separate. |
 
-`OPENCLAW_NO_AUTO_UPDATE=1` also prevents automatic update requests. A truthy `CI` suppresses both
-tiers unless a replacement `OPENCLAW_TELEMETRY_ENDPOINT` is explicitly configured.
+`OPENCLAW_NO_AUTO_UPDATE=1` also prevents automatic update requests. A truthy `CI` suppresses
+daily checks and schema-1 feature reports unless a replacement `OPENCLAW_TELEMETRY_ENDPOINT`
+is explicitly configured. Outcome reports remain suppressed in CI even with a replacement endpoint.
 
 Disabling requests stops future automatic reports; it does not erase previously recorded rows.
 The same three-month Analytics Engine retention applies. This receiver adds no backup or export job.

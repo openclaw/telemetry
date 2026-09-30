@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Accept strictly validated, identifier-free update outcomes in a separate, explicitly configured dataset; add a side-effect-free capability check while keeping production collection unbound. Thanks @roboclaw-bot, @fuller-stack-dev, and @vincentkoc.
 - Refresh Wrangler, Cloudflare Worker types, and Vitest with the matching workerd runtime and npm lockfile.
 - Discard malformed UTF-8 feature-statistics uploads instead of repairing and recording them, while preserving update responses.
 - Keep offline exports outside their executing source checkout, linked worktrees, and input archives, including differently cased paths on case-insensitive filesystems.

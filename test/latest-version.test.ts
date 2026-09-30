@@ -250,7 +250,7 @@ describe("GET | POST /api/latest-version", () => {
 		});
 	});
 
-	it.each(["{", JSON.stringify({ schema: 2, features: {} }), "x".repeat(16_385)])(
+	it.each(["{", JSON.stringify({ schema: 3, features: {} }), "x".repeat(16_385)])(
 		"retains baseline geography when the feature body is invalid: %#",
 		async (body) => {
 			const response = await worker.fetch(updateRequest(geography, { method: "POST", body }), env);

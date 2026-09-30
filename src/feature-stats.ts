@@ -3,17 +3,17 @@ import { parseFeatureStats } from "./payload.js";
 /** Body cap: the documented payload is well under 1 KB. */
 export const MAX_BODY_BYTES = 16_384;
 
-function rejectDeclaredLength(request: Request): boolean {
+function rejectDeclaredLength(request: Request, maxBytes: number): boolean {
 	const header = request.headers.get("content-length");
 	if (header === null) return false;
 	if (!/^[0-9]+$/.test(header)) return true;
 	const declared = Number(header);
-	return !Number.isSafeInteger(declared) || declared > MAX_BODY_BYTES;
+	return !Number.isSafeInteger(declared) || declared > maxBytes;
 }
 
 /** Count stream bytes so a missing Content-Length cannot allocate the whole body. */
-async function readCappedText(request: Request): Promise<string | undefined> {
-	if (rejectDeclaredLength(request)) return undefined;
+export async function readCappedBody(request: Request, maxBytes = MAX_BODY_BYTES): Promise<{ text: string; byteLength: number } | undefined> {
+	if (rejectDeclaredLength(request, maxBytes)) return undefined;
 
 	const body = request.body;
 	if (!body) return undefined;
@@ -27,7 +27,7 @@ async function readCappedText(request: Request): Promise<string | undefined> {
 			if (done) break;
 			if (!value?.byteLength) continue;
 			total += value.byteLength;
-			if (total > MAX_BODY_BYTES) {
+			if (total > maxBytes) {
 				await reader.cancel().catch(() => undefined);
 				return undefined;
 			}
@@ -45,7 +45,7 @@ async function readCappedText(request: Request): Promise<string | undefined> {
 		offset += chunk.byteLength;
 	}
 	try {
-		return new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(bytes);
+		return { text: new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(bytes), byteLength: total };
 	} catch {
 		return undefined;
 	}
@@ -53,7 +53,7 @@ async function readCappedText(request: Request): Promise<string | undefined> {
 
 export async function readFeatureStats(request: Request) {
 	if (request.method !== "POST") return undefined;
-	const raw = await readCappedText(request);
+	const raw = (await readCappedBody(request))?.text;
 	if (!raw) return undefined;
 	const parsed = ((): unknown => {
 		try {
