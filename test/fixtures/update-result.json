@@ -1,0 +1,20 @@
+{
+  "schema": 2,
+  "event": "update_result",
+  "outcome": "succeeded",
+  "fromVersion": "2026.9.4",
+  "targetVersion": "2026.9.19",
+  "resultingVersion": "2026.9.19",
+  "runningVersion": "2026.9.19",
+  "platform": "linux",
+  "arch": "x64",
+  "installMethod": "npm-global",
+  "channel": "stable",
+  "duration": "under-1m",
+  "postCheck": "passed",
+  "failedStage": "none",
+  "errorCategory": "none",
+  "errorCode": "none",
+  "rollback": "not-needed",
+  "recovery": "unknown"
+}

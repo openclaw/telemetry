@@ -1,9 +1,11 @@
 import { keepKnownNames, normalizeVersion } from "./allowlist.js";
 import { buildDataPoint } from "./analytics.js";
 import type { Env } from "./env.js";
-import { readFeatureStats } from "./feature-stats.js";
+import { readCappedBody } from "./feature-stats.js";
 import { parseRequestGeography } from "./geography.js";
-import { parseClientIdentity } from "./payload.js";
+import { parseClientIdentity, parseFeatureStats } from "./payload.js";
+import type { FeatureStats } from "./payload.js";
+import { buildUpdateResultPoint, isUpdateResultCandidate, MAX_UPDATE_RESULT_BYTES, parseUpdateResult, UPDATE_RESULT_USER_AGENT } from "./update-result.js";
 import { renderHomePage } from "./page.js";
 
 const UPSTREAM_VERSION_URL = "https://registry.npmjs.org/openclaw/latest";
@@ -90,12 +92,8 @@ async function mayRecord(request: Request, env: Env): Promise<boolean> {
 	return outcome?.success !== false;
 }
 
-async function recordRequest(request: Request, env: Env): Promise<void> {
-	// Over-limit callers still get their answer below; they just stop counting.
-	if (!(await mayRecord(request, env))) return;
-
+function recordRequest(request: Request, env: Env, features: FeatureStats | undefined): void {
 	const identity = parseClientIdentity(request.headers.get("user-agent"));
-	const features = await readFeatureStats(request);
 	const validated = features
 		? {
 				...features,
@@ -119,8 +117,33 @@ async function recordRequest(request: Request, env: Env): Promise<void> {
 }
 
 async function handleLatestVersion(request: Request, env: Env): Promise<Response> {
-	await recordRequest(request, env);
+	// Check recording quota exactly once, before reading any upload. Exhausted
+	// callers must still get a version answer even if their body never finishes.
+	if (!(await mayRecord(request, env))) return latestVersionResponse();
 
+	let parsed: unknown;
+	if (request.method === "POST") {
+		// The fixed UA keeps even malformed/oversized outcome uploads off the
+		// legacy identity/geography path. JSON discriminators also work without it.
+		const outcomeAgent = request.headers.get("user-agent") === UPDATE_RESULT_USER_AGENT;
+		const body = await readCappedBody(request, outcomeAgent ? MAX_UPDATE_RESULT_BYTES : undefined);
+		const raw = body?.text;
+		try { parsed = raw ? JSON.parse(raw) : undefined; } catch { /* Never log request bodies. */ }
+		if (outcomeAgent || isUpdateResultCandidate(parsed)) {
+			const result = body && body.byteLength <= MAX_UPDATE_RESULT_BYTES
+				? parseUpdateResult(parsed) : undefined;
+			if (!result) return jsonResponse({ error: "invalid_update_result" }, 400);
+			if (!env.UPDATE_RESULTS) return jsonResponse({ error: "update_results_unavailable" }, 503);
+			try { env.UPDATE_RESULTS.writeDataPoint(buildUpdateResultPoint(result)); }
+			catch { return jsonResponse({ error: "update_results_unavailable" }, 503); }
+			return latestVersionResponse();
+		}
+	}
+	recordRequest(request, env, parseFeatureStats(parsed));
+	return latestVersionResponse();
+}
+
+async function latestVersionResponse(): Promise<Response> {
 	const latest = await fetchLatestVersion();
 	if (!latest) return jsonResponse({ error: "version_unavailable" }, 503);
 	return jsonResponse(RELEASE_NOTE ? { ...latest, note: RELEASE_NOTE } : latest, 200, VERSION_CACHE_SECONDS);
@@ -131,6 +154,16 @@ export default {
 		const url = new URL(request.url);
 
 		if (url.pathname === "/api/latest-version") {
+			// Capability only: no body, geography, recording quota, analytics or npm.
+			// Presence is not a delivery/readiness probe; never write a sample point.
+			if (request.method === "HEAD") {
+				return new Response(null, {
+					status: env.UPDATE_RESULTS ? 204 : 503,
+					headers: env.UPDATE_RESULTS
+						? { "OpenClaw-Update-Results": "2", "Cache-Control": "no-store" }
+						: { "Cache-Control": "no-store" },
+				});
+			}
 			if (request.method !== "GET" && request.method !== "POST") {
 				return jsonResponse({ error: "method_not_allowed" }, 405);
 			}
