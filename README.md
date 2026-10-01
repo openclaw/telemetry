@@ -250,7 +250,7 @@ retained snapshots, and the public source of legacy aliases (`cli`, `claude`, `g
 [`src/public-vocabulary.ts`](src/public-vocabulary.ts) exports the complete retained `PUBLIC_NAMES`
 for ingestion and offline analysis. Neither file contains names learned from telemetry requests.
 
-GitHub Actions polls published stable OpenClaw releases hourly, at minute 23. It fully paginates
+GitHub Actions polls published stable OpenClaw releases once daily at 03:17 UTC. It fully paginates
 release metadata and resolves annotated tags to immutable commits. `releases` records the release
 identity, tag, commit, and publication time. Automatic bundled-release backfill starts with
 `v2026.9.7`, published on September 30, 2026; the older retained snapshots and catalog history remain
@@ -283,9 +283,9 @@ the deployment job alone receives `statuses: write` and the existing `CLOUDFLARE
 No new credential or cross-repository write is required. A commit made with `GITHUB_TOKEN` does not
 start the normal push workflow, so its checked deployment happens in the same run.
 
-Merging this workflow into main enables hourly generation, data-only publication, and deployment.
-Review that operational authority before activation. Polling and GitHub queue delays mean coverage
-is not immediate. GitHub can disable schedules in inactive public repositories. Changed upstream
+Merging this workflow into main enables daily generation, data-only publication, and deployment.
+Review that operational authority before activation. Coverage can lag until the next daily run plus
+GitHub queue delays. GitHub can disable schedules in inactive public repositories. Changed upstream
 metadata contracts, moved or deleted tags, incomplete pagination, byte-budget growth, and blocked
 fast-forward publication fail visibly and still need maintainer review; automation does not remove
 those maintenance boundaries. A failed rollout leaves a retryable status even if its source commit

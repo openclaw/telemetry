@@ -7,7 +7,7 @@ on:
     branches: [main]
   workflow_dispatch:
   schedule:
-    - cron: "23 * * * *"
+    - cron: "17 3 * * *"
 
 # Hold the production lane through publication and verification. Older queued
 # runs must also pass the current-main guard before they can publish or deploy.
