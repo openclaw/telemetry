@@ -1,4 +1,4 @@
-import { keepKnownNames, normalizeVersion } from "./allowlist.js";
+import { normalizeVersion } from "./allowlist.js";
 import { buildDataPoint } from "./analytics.js";
 import type { Env } from "./env.js";
 import { readCappedBody } from "./feature-stats.js";
@@ -94,20 +94,12 @@ async function mayRecord(request: Request, env: Env): Promise<boolean> {
 
 function recordRequest(request: Request, env: Env, features: FeatureStats | undefined): void {
 	const identity = parseClientIdentity(request.headers.get("user-agent"));
-	const validated = features
-		? {
-				...features,
-				channels: keepKnownNames(features.channels),
-				providerFamilies: keepKnownNames(features.providerFamilies),
-				plugins: keepKnownNames(features.plugins),
-			}
-		: undefined;
 
 	try {
 		env.TELEMETRY.writeDataPoint(
 			buildDataPoint(
 				{ ...identity, version: normalizeVersion(identity.version) },
-				validated,
+				features,
 				parseRequestGeography(request.cf),
 			),
 		);

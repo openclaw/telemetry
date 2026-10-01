@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "../src/env.js";
 import worker from "../src/index.js";
+import { PUBLIC_NAMES } from "../src/public-vocabulary.js";
 
 type MemoryCache = {
 	store: Map<string, Response>;
@@ -122,6 +123,31 @@ describe("GET | POST /api/latest-version", () => {
 			indexes: ["2026.9.2"],
 			blobs: ["2026.9.2", "linux", "x64", "node/v24.0.0", "gateway", "", "", "", "", "", "", ""],
 			doubles: [0, 0, 0],
+		});
+	});
+
+	it("records all public feature names beyond 32 while preserving the version answer", async () => {
+		const names = [
+			...Array.from({ length: 40 }, (_, index) => `aaa-private-${index}`),
+			...[...PUBLIC_NAMES].reverse(), "CODEX", "codex",
+		];
+		const response = await worker.fetch(updateRequest(geography, {
+			method: "POST",
+			body: JSON.stringify({ schema: 1, features: {
+				channels: names, providerFamilies: names, plugins: names,
+				pluginsEnabled: PUBLIC_NAMES.length, sessionsLast24h: 14,
+			} }),
+		}), env);
+		expect(response.status).toBe(200);
+		await expect(response.json()).resolves.toEqual({ version: "2026.9.2" });
+		expect(writeDataPoint).toHaveBeenCalledExactlyOnceWith({
+			indexes: ["2026.9.2"],
+			blobs: [
+				"2026.9.2", "linux", "x64", "node/v24.0.0", "gateway",
+				...Array(3).fill(PUBLIC_NAMES.join(",")),
+				"US", "CA", "San Francisco", "America/Los_Angeles",
+			],
+			doubles: [1, PUBLIC_NAMES.length, 14],
 		});
 	});
 

@@ -131,6 +131,11 @@ before parsing. Identity fields remain length-bounded and character-filtered. Fe
 complete identifiers of at most 64 characters; malformed or overlength IDs are dropped, never
 repaired or truncated into another name.
 
+Accepted feature lists retain all known public names after case folding and deduplication;
+there is no per-list 32-name cutoff. The upload cap and retained public vocabulary bound
+storage, with a byte-budget test guarding vocabulary refreshes against Analytics Engine's
+combined blob limit.
+
 The geography fields are co-located with the existing identity and feature columns in the same
 Analytics Engine row and dataset, not stored separately. Analytics Engine retains data for
 **three months** under its [published limits](https://developers.cloudflare.com/analytics/analytics-engine/limits/).

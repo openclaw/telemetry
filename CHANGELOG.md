@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Preserve all reported public channel, provider, and plugin names instead of truncating each list to 32 before validation; keep upload and Analytics Engine byte limits covered by regression tests.
 - Accept strictly validated, identifier-free update outcomes in a separate, explicitly configured dataset; add a side-effect-free capability check while keeping production collection unbound. Thanks @roboclaw-bot, @fuller-stack-dev, and @vincentkoc.
 - Refresh Wrangler, Cloudflare Worker types, and Vitest with the matching workerd runtime and npm lockfile.
 - Discard malformed UTF-8 feature-statistics uploads instead of repairing and recording them, while preserving update responses.
