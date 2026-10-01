@@ -20,6 +20,13 @@ jobs:
           node-version: 24
       - run: npm ci
       - run: npm run check
+      - name: Check vocabulary covers the latest OpenClaw release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          release_tag="$(gh api repos/openclaw/openclaw/releases/latest --jq .tag_name)"
+          release_sha="$(gh api "repos/openclaw/openclaw/commits/$release_tag" --jq .sha)"
+          npm run vocabulary:check -- --release-revision "$release_sha"
       - run: npx wrangler deploy --dry-run
 
   deploy:
