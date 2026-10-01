@@ -230,9 +230,9 @@ npm run deploy    # requires Cloudflare credentials for the OpenClaw account
 
 Pull requests run the typecheck, tests, a public-vocabulary release check, and a Wrangler dry-run build
 using the committed lockfile. The release check resolves the latest published OpenClaw release tag
-to its commit and fails if that commit has no reviewed vocabulary snapshot. GitHub lookup failures
+to its commit and fails if that commit has no retained vocabulary snapshot. GitHub lookup failures
 fail the check; they do not report the vocabulary as fresh.
-Deploys run from GitHub Actions on pushes to `main` (see
+Deploys run from GitHub Actions on pushes to `main`, manual runs, and vocabulary maintenance (see
 [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)), using the `CLOUDFLARE_API_TOKEN`
 repository secret.
 
@@ -250,8 +250,50 @@ retained snapshots, and the public source of legacy aliases (`cli`, `claude`, `g
 [`src/public-vocabulary.ts`](src/public-vocabulary.ts) exports the complete retained `PUBLIC_NAMES`
 for ingestion and offline analysis. Neither file contains names learned from telemetry requests.
 
-Before supporting a new OpenClaw release or catalog revision, use Node.js 24 and a trusted local
-OpenClaw Git repository containing the candidate commit and its history:
+GitHub Actions polls published stable OpenClaw releases hourly, at minute 23. It fully paginates
+release metadata and resolves annotated tags to immutable commits. `releases` records the release
+identity, tag, commit, and publication time. Automatic bundled-release backfill starts with
+`v2026.9.7`, published on September 30, 2026; the older retained snapshots and catalog history remain
+intact. This does not establish complete coverage of transient bundled names from earlier releases.
+Drafts and prereleases are excluded. Every missed stable release since the inclusive anchor is
+processed, including releases with the same publication timestamp.
+
+The existing Deploy workflow owns the whole update:
+
+1. Discovery makes metadata requests only. An unchanged scheduled run stops before installing
+   dependencies or fetching source when current main already has a successful `telemetry/deploy`
+   status. Missing, pending, and failed statuses retry validation and deployment. Manual runs also
+   provide recovery without a source change.
+2. Generation runs with read-only repository permission, no persisted checkout credentials, and no
+   Cloudflare secret. It invokes the existing generator against immutable public Git objects.
+3. A fresh read-only job validates only the two generated files against trusted repository code,
+   then runs the normal checks, complete-vocabulary byte-budget tests, and Wrangler dry-run.
+4. A separate job can publish only `data/public-vocabulary.json` and `src/public-vocabulary.ts`.
+   It checks the artifact again without installing dependencies or executing producer-supplied code.
+   Existing snapshots and aliases cannot change. Publication is a fast-forward from the exact
+   discovered main commit; concurrent changes stop it instead of overwriting source.
+5. The existing deployment job checks out the exact checked or published commit. All production
+   runs share one concurrency group, and stale runs fail the current-main guard. The job tags the
+   Worker with its commit and verifies that the newest deployment sends 100% of traffic to that
+   exact tagged version before recording success. It retains the existing trusted npm/Wrangler
+   toolchain; the artifact cannot replace package files, scripts, or workflow code.
+
+Generation never learns names from client requests. The publisher alone receives `contents: write`;
+the deployment job alone receives `statuses: write` and the existing `CLOUDFLARE_API_TOKEN`.
+No new credential or cross-repository write is required. A commit made with `GITHUB_TOKEN` does not
+start the normal push workflow, so its checked deployment happens in the same run.
+
+Merging this workflow into main enables hourly generation, data-only publication, and deployment.
+Review that operational authority before activation. Polling and GitHub queue delays mean coverage
+is not immediate. GitHub can disable schedules in inactive public repositories. Changed upstream
+metadata contracts, moved or deleted tags, incomplete pagination, byte-budget growth, and blocked
+fast-forward publication fail visibly and still need maintainer review; automation does not remove
+those maintenance boundaries. A failed rollout leaves a retryable status even if its source commit
+was already published. Inspect the failed Deploy run, repair the named contract or permission, then
+run Deploy manually from current main. Do not weaken the allowlist or force-push past a guard.
+
+For a reviewed manual repair, use Node.js 24 and a trusted local OpenClaw Git repository containing
+the candidate commit and its history:
 
 ```bash
 npm run vocabulary:check -- --source <openclaw-repository> --revision <full-public-commit-sha>
@@ -280,7 +322,7 @@ The initial snapshot includes all catalog revisions on the public main history s
 `844e781ca40952c98ee997b016e3cc5d2f12f9f3`, before name allowlisting began in August 2026.
 Refreshes append snapshots; never remove older ones during routine updates. This retains removed or
 renamed public entries, including names admitted by the older
-moving-catalog implementation. New public names remain rejected until reviewed metadata is deployed.
+moving-catalog implementation. New public names remain rejected until validated metadata is deployed.
 The vocabulary is compiled into the Worker. Loading it requires neither upstream requests nor
 Cache API access, so old allowlist cache entries cannot be reused and cache outages cannot interrupt
 name validation. Ingestion checks the compiled vocabulary without exposing its mutable set.

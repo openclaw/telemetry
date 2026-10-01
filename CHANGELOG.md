@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Maintain public vocabulary automatically from immutable stable releases, with retained backfill, isolated generation, constrained publication, serialized deployment, and retryable exact-commit rollout verification.
 - Preserve all reported public channel, provider, and plugin names instead of truncating each list to 32 before validation; keep upload and Analytics Engine byte limits covered by regression tests.
 - Refresh retained public names from OpenClaw 2026.9.7, including GitHub, QuickJS Code Mode, and Session Share; require a reviewed snapshot for the latest published release in the existing CI check.
 - Accept strictly validated, identifier-free update outcomes in a separate, explicitly configured dataset; add a side-effect-free capability check while keeping production collection unbound. Thanks @roboclaw-bot, @fuller-stack-dev, and @vincentkoc.
