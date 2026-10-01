@@ -7,6 +7,8 @@
  * malformed or hostile request can never widen what this service records.
  */
 
+import { keepKnownNames } from "./allowlist.js";
+
 export type ClientIdentity = {
 	version: string;
 	platform: string;
@@ -33,7 +35,6 @@ const UNKNOWN = "unknown";
 const MAX_FIELD_LENGTH = 64;
 // Bound matching work before the regex; five stored fields fit within this limit.
 const MAX_USER_AGENT_LENGTH = 512;
-const MAX_LIST_ITEMS = 32;
 const MAX_COUNT = 1_000_000;
 
 function sanitizeField(value: string | undefined): string {
@@ -69,8 +70,9 @@ function sanitizeList(value: unknown): string[] {
 			!/[^A-Za-z0-9._/-]/u.test(entry) &&
 			entry !== UNKNOWN,
 	);
-	// Sorted + de-duplicated so identical installs produce identical rows.
-	return [...new Set(items)].sort().slice(0, MAX_LIST_ITEMS);
+	// The retained public vocabulary bounds storage. Truncating input first would
+	// let unknown names or case duplicates evict valid public names.
+	return keepKnownNames(items);
 }
 
 function sanitizeCount(value: unknown): number {

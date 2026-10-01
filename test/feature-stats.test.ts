@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { MAX_BODY_BYTES, readFeatureStats } from "../src/feature-stats.js";
+import { PUBLIC_NAMES } from "../src/public-vocabulary.js";
 
 const FEATURE_BODY = JSON.stringify({
 	schema: 1,
@@ -41,6 +42,20 @@ function countingBody(totalBytes: number, chunkSize: number) {
 }
 
 describe("readFeatureStats", () => {
+	it("retains the full public inventory while omitting private names", async () => {
+		const request = new Request("https://telemetry.example/api/latest-version", {
+			method: "POST",
+			body: JSON.stringify({ schema: 1, features: {
+				plugins: [...PUBLIC_NAMES, "CODEX", "private-plugin"],
+				pluginsEnabled: PUBLIC_NAMES.length + 1,
+			} }),
+		});
+		await expect(readFeatureStats(request)).resolves.toMatchObject({
+			plugins: PUBLIC_NAMES,
+			pluginsEnabled: PUBLIC_NAMES.length + 1,
+		});
+	});
+
 	it("accepts a documented POST body under the cap", async () => {
 		const request = new Request("https://telemetry.example/api/latest-version", {
 			method: "POST",

@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { keepKnownNames } from "../src/allowlist.js";
 import { buildDataPoint } from "../src/analytics.js";
+import { MAX_BODY_BYTES } from "../src/feature-stats.js";
 import { parseRequestGeography } from "../src/geography.js";
 import { parseClientIdentity, parseFeatureStats } from "../src/payload.js";
+import { PUBLIC_NAMES } from "../src/public-vocabulary.js";
 
 describe("parseClientIdentity", () => {
 	it("reads version, platform, runtime, arch and surface from the client User-Agent", () => {
@@ -119,7 +120,7 @@ describe("parseFeatureStats", () => {
 		expect(parsed).toEqual(expectedFeatures);
 	});
 
-	it("bounds list length and coerces hostile counts", () => {
+	it("drops unknown names and coerces hostile counts", () => {
 		const parsed = parseFeatureStats({
 			schema: 1,
 			features: {
@@ -129,7 +130,7 @@ describe("parseFeatureStats", () => {
 				sessionsLast24h: Number.POSITIVE_INFINITY,
 			},
 		});
-		expect(parsed?.channels).toHaveLength(32);
+		expect(parsed?.channels).toEqual([]);
 		expect(parsed?.providerFamilies).toEqual(["openai"]);
 		expect(parsed?.pluginsEnabled).toBe(0);
 		expect(parsed?.sessionsLast24h).toBe(0);
@@ -153,17 +154,18 @@ describe("parseFeatureStats", () => {
 	);
 
 	it("rejects overlength tokens without truncating them to another identifier", () => {
-		const valid = "a".repeat(64);
+		const valid = "codex";
+		const overlength = valid + "a".repeat(64);
 		expect(
 			parseFeatureStats({
 				schema: 1,
-				features: { plugins: [`${valid}b`, valid] },
+				features: { plugins: [overlength, valid] },
 			})?.plugins,
 		).toEqual([valid]);
 		expect(
 			parseFeatureStats({
 				schema: 1,
-				features: { plugins: [`${valid}b`] },
+				features: { plugins: [overlength] },
 			})?.plugins,
 		).toEqual([]);
 	});
@@ -175,11 +177,35 @@ describe("parseFeatureStats", () => {
 				plugins: ["CODEX", "codex", "Browser", "acme-internal-crm", "cod ex"],
 			},
 		});
-		expect(keepKnownNames(parsed?.plugins ?? [])).toEqual([
+		expect(parsed?.plugins).toEqual([
 			"browser",
 			"codex",
 		]);
 	});
+
+	it.each(["channels", "providerFamilies", "plugins"] as const)(
+		"retains more than 32 public %s after validation and canonicalization",
+		(field) => {
+			expect(PUBLIC_NAMES.length).toBeGreaterThan(32);
+			const names = [...PUBLIC_NAMES].reverse();
+			const parsed = parseFeatureStats({ schema: 1, features: { [field]: names } });
+			expect(parsed?.[field]).toEqual(PUBLIC_NAMES);
+		},
+	);
+
+	it.each(["channels", "providerFamilies", "plugins"] as const)(
+		"does not let unknown names or case duplicates evict valid %s",
+		(field) => {
+			const names = [
+				...Array.from({ length: 40 }, (_, index) => `aaa-private-${index}`),
+				...PUBLIC_NAMES.slice(0, 32).flatMap((name) => [name.toUpperCase(), name]),
+				"telegram", "TELEGRAM", "zai", "z ai",
+			];
+			const parsed = parseFeatureStats({ schema: 1, features: { [field]: names } });
+			expect(parsed?.[field])
+				.toEqual([...PUBLIC_NAMES.slice(0, 32), "telegram", "zai"]);
+		},
+	);
 
 	it("accepts schema-1 feature reports that predate the optional plugins list", () => {
 		const { plugins, ...features } = body.features;
@@ -196,6 +222,31 @@ describe("parseFeatureStats", () => {
 
 describe("buildDataPoint", () => {
 	const identity = parseClientIdentity("openclaw/2026.8.2 (darwin; node/v26.0.1; arm64; gateway)");
+
+	it("keeps the complete retained vocabulary within upload and Analytics Engine byte budgets", () => {
+		const body = {
+			schema: 1,
+			features: {
+				channels: PUBLIC_NAMES,
+				providerFamilies: PUBLIC_NAMES,
+				plugins: PUBLIC_NAMES,
+				pluginsEnabled: 1_000_000,
+				sessionsLast24h: 1_000_000,
+			},
+		};
+		const encoder = new TextEncoder();
+		expect(encoder.encode(JSON.stringify(body)).byteLength).toBeLessThanOrEqual(MAX_BODY_BYTES);
+		// Reserve every identity/geography field's full byte allowance. A vocabulary
+		// refresh must not exceed Analytics Engine's 16 KiB combined blob limit.
+		const point = buildDataPoint(
+			{ version: "v".repeat(64), platform: "p".repeat(64), arch: "a".repeat(64), runtime: "r".repeat(64), surface: "s".repeat(64) },
+			parseFeatureStats(body),
+			{ country: "US", regionCode: "ABC", city: "é".repeat(64), timezone: "T".repeat(64) },
+		);
+		expect(point.blobs.slice(5, 8)).toEqual(Array(3).fill(PUBLIC_NAMES.join(",")));
+		expect(point.blobs.reduce((bytes, value) => bytes + encoder.encode(value).byteLength, 0))
+			.toBeLessThanOrEqual(16_384);
+	});
 
 	it("marks rows without feature stats and still records the identity columns", () => {
 		expect(buildDataPoint(identity, undefined, parseRequestGeography(undefined))).toEqual({
