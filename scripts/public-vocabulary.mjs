@@ -61,17 +61,23 @@ export async function buildSnapshot(source, revision, catalogHistoryStart) {
 			collectCatalog(JSON.parse(git(source, "show", `${catalogRevision}:${path}`)), names);
 		}
 	}
+	const providerMetadata = "src/config/model-provider-overlay-ids.ts";
+	// Retained snapshots predate the metadata's move out of model-provider-config.
+	const providerPath = git(source, "ls-tree", "--name-only", revision, "--", providerMetadata).trim() ||
+		"src/config/model-provider-config.ts";
 	for (const name of readProviderOverlays(
-		git(source, "show", `${revision}:src/config/model-provider-config.ts`),
+		git(source, "show", `${revision}:${providerPath}`),
 	)) addName(names, name);
 
 	const directory = await mkdtemp(join(tmpdir(), "openclaw-public-vocabulary-"));
 	try {
 		// The packaging helper reads metadata and top-level source filenames.
 		// Export those exact public files, without a checkout, dependencies, or index.
+		const packagingPolicy = "src/shared/non-packaged-plugin-dirs.ts";
 		const paths = git(source, "ls-tree", "-r", "--name-only", revision, "--",
-			"package.json", "scripts/lib", "extensions").trim().split("\n").filter(
+			"package.json", "scripts/lib", "extensions", packagingPolicy).trim().split("\n").filter(
 			(path) => path === "package.json" || path.startsWith("scripts/lib/") ||
+				path === packagingPolicy ||
 				/^extensions\/[^/]+\/[^/]+$/u.test(path),
 		);
 		const archive = execFileSync("git", ["-C", source, "archive", revision, "--", ...paths], {
@@ -134,6 +140,14 @@ export function renderVocabulary(metadata) {
 	].join("\n");
 }
 
+/** CI supplies the current release's resolved commit, independently of our recorded snapshots. */
+export function assertReleaseCoverage(metadata, revision) {
+	if (!SHA.test(revision)) throw new Error("Use a full immutable released commit SHA");
+	if (!metadata.snapshots.some((snapshot) => snapshot.revision === revision)) {
+		throw new Error(`Released OpenClaw revision ${revision} has no reviewed vocabulary snapshot; refresh public metadata`);
+	}
+}
+
 async function main() {
 	const { values } = parseArgs({
 		options: {
@@ -141,9 +155,14 @@ async function main() {
 			source: { type: "string" },
 			revision: { type: "string" },
 			"history-start": { type: "string" },
+			"release-revision": { type: "string" },
 		},
 	});
 	const metadata = JSON.parse(await readFile(METADATA, "utf8"));
+	if (values["release-revision"]) {
+		if (!values.check) throw new Error("--release-revision requires --check");
+		assertReleaseCoverage(metadata, values["release-revision"]);
+	}
 	if (values.source) {
 		if (values.revision) {
 			const historyStart = values["history-start"] ?? metadata.snapshots[0]?.catalogHistoryStart;

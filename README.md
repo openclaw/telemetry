@@ -228,7 +228,10 @@ npm run dev       # local worker at http://localhost:8787
 npm run deploy    # requires Cloudflare credentials for the OpenClaw account
 ```
 
-Pull requests run the typecheck, tests, and a Wrangler dry-run build using the committed lockfile.
+Pull requests run the typecheck, tests, a public-vocabulary release check, and a Wrangler dry-run build
+using the committed lockfile. The release check resolves the latest published OpenClaw release tag
+to its commit and fails if that commit has no reviewed vocabulary snapshot. GitHub lookup failures
+fail the check; they do not report the vocabulary as fresh.
 Deploys run from GitHub Actions on pushes to `main` (see
 [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)), using the `CLOUDFLARE_API_TOKEN`
 repository secret.
@@ -254,19 +257,24 @@ OpenClaw Git repository containing the candidate commit and its history:
 npm run vocabulary:check -- --source <openclaw-repository> --revision <full-public-commit-sha>
 npm run vocabulary:update -- --source <openclaw-repository> --revision <full-public-commit-sha>
 npm run vocabulary:check -- --source <openclaw-repository>
+npm run vocabulary:check -- --release-revision <full-released-commit-sha>
 npm run check
 ```
 
 The first command fails when the candidate is not recorded. Review the generated diff, commit both
 metadata and generated source, and deploy through the normal PR workflow. Do not edit the generated
 names by hand. Plain `npm run vocabulary:check` runs offline in CI and detects metadata/output drift;
-`--source` also reproduces every snapshot from immutable Git objects. It never changes the source
-checkout, runs an install, or uses its uncommitted files.
+`--source` also reproduces every snapshot from immutable Git objects. `--release-revision` additionally
+requires a snapshot for the independently resolved release commit. This check is read-only and does
+not automatically admit new names. Neither check changes the source checkout, runs an install, or
+uses its uncommitted files.
 
 The generator calls upstream `listBundledPluginPackArtifacts` with the default packaging environment,
 then reads the selected plugin manifests, public provider overlays, and three official catalogs.
 Packaging exclusions remain owned by OpenClaw. A changed upstream metadata contract fails generation
 and needs review rather than silently falling back to a partial vocabulary.
+The generator supports the provider-metadata location and shared packaging policy used by release
+`v2026.9.7` (`c074824a27c96d3983043f9eeb33823cd1772d8c`), while preserving replay of older snapshots.
 
 The initial snapshot includes all catalog revisions on the public main history since commit
 `844e781ca40952c98ee997b016e3cc5d2f12f9f3`, before name allowlisting began in August 2026.

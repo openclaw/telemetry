@@ -1,9 +1,9 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { renderVocabulary } from "../scripts/public-vocabulary.mjs";
+import { assertReleaseCoverage, buildSnapshot, renderVocabulary } from "../scripts/public-vocabulary.mjs";
 import { readProviderOverlays } from "../scripts/lib/public-provider-overlays.mjs";
 
 const oldRevision = "1".repeat(40);
@@ -42,6 +42,67 @@ describe("public provider metadata", () => {
 });
 
 describe("public vocabulary generation", () => {
+	it("replays historical metadata and the released split provider and packaging owners", async () => {
+		const directory = await mkdtemp(join(tmpdir(), "vocabulary-release-test-"));
+		const git = (...args) => execFileSync("git", ["-C", directory, ...args], {
+			encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+		});
+		const commit = () => {
+			git("add", ".");
+			git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+				"-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", "commit", "-qm", "fixture");
+			return git("rev-parse", "HEAD").trim();
+		};
+		try {
+			for (const path of ["scripts/lib", "src/config", "src/shared", "extensions/public-plugin"]) {
+				await mkdir(join(directory, path), { recursive: true });
+			}
+			for (const kind of ["plugin", "channel", "provider"]) {
+				await writeFile(join(directory, `scripts/lib/official-external-${kind}-catalog.json`),
+					JSON.stringify({ entries: [] }));
+			}
+			await writeFile(join(directory, "package.json"), '{"type":"module"}');
+			await writeFile(join(directory, "src/config/model-provider-config.ts"),
+				'const BUILT_IN_MODEL_PROVIDER_OVERLAY_IDS = new Set(["openai"]);');
+			await writeFile(join(directory, "extensions/public-plugin/openclaw.plugin.json"),
+				JSON.stringify({ id: "public-plugin", channels: ["public-channel"] }));
+			const helper = join(directory, "scripts/lib/bundled-plugin-build-entries.mjs");
+			await writeFile(helper, `export function listBundledPluginPackArtifacts() {
+				return ["dist/extensions/public-plugin/openclaw.plugin.json"];
+			}`);
+			git("init", "--quiet");
+			const historical = commit();
+			const oldSnapshot = await buildSnapshot(directory, historical, historical);
+			await rename(join(directory, "src/config/model-provider-config.ts"),
+				join(directory, "src/config/model-provider-overlay-ids.ts"));
+			await writeFile(join(directory, "src/shared/non-packaged-plugin-dirs.ts"),
+				'export const NON_PACKAGED_BUNDLED_PLUGIN_DIRS: ReadonlySet<string> = new Set(["private-plugin"]);');
+			await writeFile(helper, `import { NON_PACKAGED_BUNDLED_PLUGIN_DIRS } from "../../src/shared/non-packaged-plugin-dirs.ts";
+				export function listBundledPluginPackArtifacts() {
+					return ["public-plugin", "private-plugin"].filter(id => !NON_PACKAGED_BUNDLED_PLUGIN_DIRS.has(id))
+						.map(id => "dist/extensions/" + id + "/openclaw.plugin.json");
+				}`);
+			const released = commit();
+			// Dirty working files must never influence an immutable release snapshot.
+			await writeFile(join(directory, "src/config/model-provider-overlay-ids.ts"), "invalid source");
+			const current = await buildSnapshot(directory, released, historical);
+			expect(current.names).toEqual(["openai", "public-channel", "public-plugin"]);
+			expect(current.bundledPlugins).toEqual(["public-plugin"]);
+			expect(await buildSnapshot(directory, historical, historical)).toEqual(oldSnapshot);
+		} finally {
+			await rm(directory, { recursive: true, force: true });
+		}
+	}, 10_000);
+
+	it("rejects a newer release even when the recorded vocabulary is internally consistent", () => {
+		const metadata = { schemaVersion: 1, legacyAliases: aliases,
+			snapshots: [{ revision: oldRevision, names: ["openai"] }] };
+		expect(renderVocabulary(metadata)).toContain('"openai"');
+		expect(() => assertReleaseCoverage(metadata, newRevision)).toThrow("no reviewed vocabulary snapshot");
+		expect(() => assertReleaseCoverage(metadata, "main")).toThrow("immutable released commit SHA");
+		expect(() => assertReleaseCoverage(metadata, oldRevision)).not.toThrow();
+	});
+
 	it("rejects malformed upstream provider declarations without unbounded parsing", async () => {
 		const directory = await mkdtemp(join(tmpdir(), "vocabulary-source-test-"));
 		try {
