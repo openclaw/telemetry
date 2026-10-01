@@ -6,18 +6,103 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * *"
+
+# Hold the production lane through publication and verification. Older queued
+# runs must also pass the current-main guard before they can publish or deploy.
+concurrency:
+  group: telemetry-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || 'production' }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
 
 jobs:
-  check:
+  discover:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      statuses: read
+    outputs:
+      refresh: ${{ steps.plan.outputs.refresh }}
+      deploy: ${{ steps.plan.outputs.deploy }}
+      plan: ${{ steps.plan.outputs.plan }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v7
         with:
           node-version: 24
+      - id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/vocabulary-maintenance.mjs plan --base "$GITHUB_SHA" --event "$GITHUB_EVENT_NAME"
+
+  generate:
+    needs: discover
+    if: needs.discover.outputs.refresh == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: telemetry
+          persist-credentials: false
+      - uses: actions/checkout@v7
+        with:
+          repository: openclaw/openclaw
+          ref: ${{ fromJSON(needs.discover.outputs.plan).releases[0].revision }}
+          path: upstream-source
+          fetch-depth: 0
+          sparse-checkout: package.json
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - run: npm ci
+        working-directory: telemetry
+      # This imports released upstream packaging code. No write token or
+      # Cloudflare secret is available; the next job checks only its data output.
+      - env:
+          VOCABULARY_PLAN: ${{ needs.discover.outputs.plan }}
+        run: node scripts/vocabulary-maintenance.mjs generate --source ../upstream-source
+        working-directory: telemetry
+      - uses: actions/upload-artifact@v7
+        with:
+          name: generated-vocabulary
+          if-no-files-found: error
+          retention-days: 1
+          path: |
+            telemetry/data/public-vocabulary.json
+            telemetry/src/public-vocabulary.ts
+
+  check:
+    needs: [discover, generate]
+    if: >-
+      always() && !cancelled() &&
+      (github.event_name == 'pull_request' ||
+       (needs.discover.result == 'success' && needs.discover.outputs.deploy == 'true' &&
+        (needs.generate.result == 'success' || needs.generate.result == 'skipped')))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v8
+        if: needs.discover.outputs.refresh == 'true'
+        with:
+          name: generated-vocabulary
+          path: ${{ runner.temp }}/vocabulary
+      - if: needs.discover.outputs.refresh == 'true'
+        env:
+          VOCABULARY_PLAN: ${{ needs.discover.outputs.plan }}
+        run: node scripts/vocabulary-maintenance.mjs apply --artifact "$RUNNER_TEMP/vocabulary"
       - run: npm ci
       - run: npm run check
       - name: Check vocabulary covers the latest OpenClaw release
@@ -28,17 +113,104 @@ jobs:
           release_sha="$(gh api "repos/openclaw/openclaw/commits/$release_tag" --jq .sha)"
           npm run vocabulary:check -- --release-revision "$release_sha"
       - run: npx wrangler deploy --dry-run
+      - uses: actions/upload-artifact@v7
+        if: needs.discover.outputs.refresh == 'true'
+        with:
+          name: checked-vocabulary
+          if-no-files-found: error
+          retention-days: 1
+          path: |
+            data/public-vocabulary.json
+            src/public-vocabulary.ts
 
-  deploy:
-    needs: check
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+  publish:
+    needs: [discover, check]
+    if: needs.discover.outputs.refresh == 'true' && needs.check.result == 'success'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      sha: ${{ steps.commit.outputs.sha }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v8
+        with:
+          name: checked-vocabulary
+          path: ${{ runner.temp }}/vocabulary
+      # No dependency installation or producer-supplied executable runs here.
+      - env:
+          VOCABULARY_PLAN: ${{ needs.discover.outputs.plan }}
+        run: node scripts/vocabulary-maintenance.mjs apply --artifact "$RUNNER_TEMP/vocabulary"
+      - id: commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          node scripts/vocabulary-maintenance.mjs guard-main --target "$GITHUB_SHA"
+          changed="$(git diff --name-only)"
+          test -n "$changed"
+          test -z "$(printf '%s\n' "$changed" | grep -Ev '^(data/public-vocabulary.json|src/public-vocabulary.ts)$')"
+          git diff --check
+          git add -- data/public-vocabulary.json src/public-vocabulary.ts
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            -c core.hooksPath=/dev/null commit -m 'chore(telemetry): refresh released public vocabulary'
+          gh auth setup-git
+          git -c gc.auto=0 -c maintenance.auto=false push origin HEAD:refs/heads/main
+          sha="$(git rev-parse HEAD)"
+          node scripts/vocabulary-maintenance.mjs guard-main --target "$sha"
+          printf 'sha=%s\n' "$sha" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    needs: [discover, check, publish]
+    if: >-
+      always() && !cancelled() && github.event_name != 'pull_request' &&
+      github.ref == 'refs/heads/main' && needs.discover.outputs.deploy == 'true' &&
+      needs.check.result == 'success' &&
+      (needs.publish.result == 'success' ||
+       (needs.publish.result == 'skipped' && needs.discover.outputs.refresh == 'false'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      statuses: write
+    env:
+      TARGET_SHA: ${{ needs.publish.outputs.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TARGET_SHA }}
+          persist-credentials: false
       - uses: actions/setup-node@v7
         with:
           node-version: 24
       - run: npm ci
-      - run: npx wrangler deploy
+      - id: admitted
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$TARGET_SHA"
+          node scripts/vocabulary-maintenance.mjs guard-main --target "$TARGET_SHA"
+          gh api "repos/openclaw/telemetry/statuses/$TARGET_SHA" --method POST \
+            -f state=pending -f context=telemetry/deploy \
+            -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --silent
+      - id: deployed
+        run: |
+          npx wrangler deploy --tag "$TARGET_SHA"
+          node scripts/vocabulary-maintenance.mjs verify-deployment --target "$TARGET_SHA"
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      # GITHUB_TOKEN's data commit does not trigger another push run. This same
+      # run deploys it, and a failed/missing receipt makes the next poll retry.
+      - if: always() && steps.admitted.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEPLOY_RESULT: ${{ steps.deployed.outcome == 'success' && 'success' || 'failure' }}
+        run: |
+          gh api "repos/openclaw/telemetry/statuses/$TARGET_SHA" --method POST \
+            -f state="$DEPLOY_RESULT" -f context=telemetry/deploy \
+            -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --silent

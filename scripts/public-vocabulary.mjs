@@ -4,7 +4,6 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
-import { readProviderOverlays } from "./lib/public-provider-overlays.mjs";
 
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
 const METADATA = join(ROOT, "data/public-vocabulary.json");
@@ -46,6 +45,9 @@ function collectCatalog(body, names) {
 
 /** Read immutable Git objects, never the source checkout's working files. */
 export async function buildSnapshot(source, revision, catalogHistoryStart) {
+	// Publication uses the deterministic renderer without loading parser dependencies
+	// or executing the upstream packaging helper. Only generation needs this import.
+	const { readProviderOverlays } = await import("./lib/public-provider-overlays.mjs");
 	if (!SHA.test(revision) || !SHA.test(catalogHistoryStart)) {
 		throw new Error("Use full immutable commit SHAs for revision and history start");
 	}
@@ -144,7 +146,7 @@ export function renderVocabulary(metadata) {
 export function assertReleaseCoverage(metadata, revision) {
 	if (!SHA.test(revision)) throw new Error("Use a full immutable released commit SHA");
 	if (!metadata.snapshots.some((snapshot) => snapshot.revision === revision)) {
-		throw new Error(`Released OpenClaw revision ${revision} has no reviewed vocabulary snapshot; refresh public metadata`);
+		throw new Error(`Released OpenClaw revision ${revision} has no retained vocabulary snapshot; refresh public metadata`);
 	}
 }
 

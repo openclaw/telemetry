@@ -98,7 +98,7 @@ describe("public vocabulary generation", () => {
 		const metadata = { schemaVersion: 1, legacyAliases: aliases,
 			snapshots: [{ revision: oldRevision, names: ["openai"] }] };
 		expect(renderVocabulary(metadata)).toContain('"openai"');
-		expect(() => assertReleaseCoverage(metadata, newRevision)).toThrow("no reviewed vocabulary snapshot");
+		expect(() => assertReleaseCoverage(metadata, newRevision)).toThrow("no retained vocabulary snapshot");
 		expect(() => assertReleaseCoverage(metadata, "main")).toThrow("immutable released commit SHA");
 		expect(() => assertReleaseCoverage(metadata, oldRevision)).not.toThrow();
 	});

@@ -600,5 +600,13 @@
         "zoom-meetings"
       ]
     }
+  ],
+  "releases": [
+    {
+      "id": "RE_kwDOQb6kR84X0tXI",
+      "tag": "v2026.9.7",
+      "revision": "c074824a27c96d3983043f9eeb33823cd1772d8c",
+      "publishedAt": "2026-09-30T04:44:14Z"
+    }
   ]
 }
