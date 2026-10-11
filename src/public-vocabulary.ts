@@ -33,6 +33,7 @@ export const PUBLIC_NAMES = [
 	"clawrouter",
 	"cli",
 	"clickclack",
+	"cloudflare",
 	"cloudflare-ai-gateway",
 	"code-mode-quickjs",
 	"codex",
