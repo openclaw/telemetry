@@ -193,6 +193,7 @@ export const PUBLIC_NAMES = [
 	"wecom-openclaw-plugin",
 	"whatsapp",
 	"workboard",
+	"x",
 	"x-ai",
 	"xai",
 	"xiaomi",
