@@ -35,7 +35,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@v7
         with:
-          node-version: 24
+          node-version: 24.22.1
       - id: plan
         env:
           GH_TOKEN: ${{ github.token }}
@@ -61,7 +61,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@v7
         with:
-          node-version: 24
+          node-version: 24.22.1
       - run: npm ci
         working-directory: telemetry
       # This imports released upstream packaging code. No write token or
@@ -93,7 +93,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@v7
         with:
-          node-version: 24
+          node-version: 24.22.1
       - uses: actions/download-artifact@v8
         if: needs.discover.outputs.refresh == 'true'
         with:
@@ -137,7 +137,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@v7
         with:
-          node-version: 24
+          node-version: 24.22.1
       - uses: actions/download-artifact@v8
         with:
           name: checked-vocabulary
@@ -186,7 +186,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@v7
         with:
-          node-version: 24
+          node-version: 24.22.1
       - run: npm ci
       - id: admitted
         env:
