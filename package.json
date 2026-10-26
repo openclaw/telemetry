@@ -25,6 +25,9 @@
   },
   "allowScripts": {
     "esbuild@0.28.1": true,
-    "workerd@1.20260926.1": true
+    "workerd@1.20261021.1": true
+  },
+  "overrides": {
+    "workerd": "1.20261021.1"
   }
 }
