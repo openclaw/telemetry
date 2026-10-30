@@ -1,0 +1,16 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "openclaw-telemetry-local-proof",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": false, "logs": { "enabled": false, "invocation_logs": false } },
+  "d1_databases": [{
+    "binding": "INSTALLATION_COUNTS",
+    "database_name": "installation-counts-local",
+    "database_id": "00000000-0000-0000-0000-000000000001",
+    "migrations_dir": "migrations",
+    "remote": false
+  }],
+  "triggers": { "crons": ["0 0 * * *"] }
+}

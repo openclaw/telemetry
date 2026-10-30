@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Accept identifier-free reporting-installation counts into an optional aggregate-only D1 `(day, gap, reports)` histogram with 90-day pruning; successful update answers advertise the server UTC day only when the binding exists, and production stays unbound. Thanks @roboclaw-bot.
 - Maintain public vocabulary with daily checks of immutable stable releases, retained backfill, isolated generation, constrained publication, serialized deployment, and retryable exact-commit rollout verification.
 - Preserve all reported public channel, provider, and plugin names instead of truncating each list to 32 before validation; keep upload and Analytics Engine byte limits covered by regression tests.
 - Refresh retained public names from OpenClaw 2026.9.7, including GitHub, QuickJS Code Mode, and Session Share; require a reviewed snapshot for the latest published release in the existing CI check.

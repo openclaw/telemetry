@@ -39,8 +39,11 @@ uses the recording limiter, writes analytics (including sample points), or looks
 up a version. It is a protocol capability check, **not production readiness or
 successful storage proof**. The client shares a three-second timeout across both
 requests, disallows redirects, and rechecks update-request opt-outs after the
-HEAD await before sending. No retries or delayed queue are added. Daily GET and
-opt-in schema-1 feature POST remain single requests and need no handshake.
+HEAD await before sending. No retries or delayed queue are added. The daily
+version GET or opt-in schema-1 feature POST needs no separate HEAD handshake.
+When separately configured, the [installation-count protocol](installation-counts.md)
+can advertise its own capability on the successful version response and follow
+it with one isolated empty count-only POST; that is not a schema-2 outcome.
 
 ## Wire contract
 
