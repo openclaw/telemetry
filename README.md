@@ -15,6 +15,29 @@ written from a validated request.
 | `HEAD /api/latest-version` | Outcome capability only: empty 204 with `OpenClaw-Update-Results: 2` when its separate binding is present; otherwise empty 503 without that header. Always `Cache-Control: no-store`; no analytics, quota consumption or version lookup. |
 | `GET /` | Human-readable page: what is collected, how to turn it off, without a public statistics dashboard. |
 
+## Aggregate-only reporting installation counts
+
+Ordinary daily GETs and valid schema-1 POSTs send **no count header**. When the
+optional D1 binding is configured, successful 200 version answers advertise
+`OpenClaw-Installation-Count: 1;<authoritative server UTC ordinal day>` with
+`Cache-Control: no-store`. A companion client can claim that server day once per
+endpoint/state root and send one separate empty POST to the same endpoint using
+`User-Agent: openclaw-installation-count/1` and
+`OpenClaw-Installation-Count: 1;<server day>;<gap>`. It has no feature/version/location
+fields, cannot enter raw Analytics Engine recording, and increments only a separate
+D1 histogram `(day, gap, reports)`. These are **observed reporting installation-state
+roots**, not unique people or engagement. Explicit telemetry off and `DO_NOT_TRACK`
+suppress the count POST; it forbids redirects, has an independent three-second
+timeout and never retries or discards the successful version answer. Old or
+unconfigured receivers get no claim or count metadata. At most one extra count-only
+POST follows an existing uncached successful 24-hour update check; no extra update
+check is added. Schema-2 outcomes and HEAD neither advertise nor increment counts.
+Production config deliberately omits the
+optional binding and cleanup trigger, so landing cannot activate collection or
+provision D1. A separately authorized rollout must configure and monitor 90-day
+cleanup, review provider recovery retention, and verify delivery. See the
+[wire contract, privacy boundaries, local proof and private rolling/calendar SQL](docs/installation-counts.md).
+
 ## Identifier-free update outcomes
 
 The same POST endpoint also accepts a strict schema-2 `update_result` event from
@@ -36,9 +59,10 @@ so the existing main-push deployment cannot implicitly activate outcome collecti
 Outcome attempts HEAD the same full configured endpoint and POST only after exact
 204 plus `OpenClaw-Update-Results: 2`; old receivers (405) and unconfigured receivers
 (503) never receive the outcome payload. Binding presence is capability, not proof
-of production delivery. The daily GET and opt-in schema-1 POST remain single requests.
+of production delivery. The daily version GET or opt-in schema-1 POST remains one request; the optional
+installation-count protocol above may follow it with one isolated count-only POST.
 See the contract for the shared timeout, no-redirect and opt-out recheck requirements.
-The daily-check behavior described below is unchanged.
+The daily version-check cadence and client cache described below are unchanged.
 
 ## What an install sends
 
@@ -98,7 +122,7 @@ each field; missing or invalid values are left empty without discarding valid fi
 
 ## What is stored
 
-Each recorded daily update check contributes one Analytics Engine data point with these columns and no others (schema-2 outcome storage is documented separately above):
+Each recorded daily update check contributes one Analytics Engine data point with these columns and no others (schema-2 outcomes and the optional aggregate-only installation histogram are documented separately above):
 
 | Column | Value |
 | --- | --- |
@@ -172,7 +196,7 @@ the edge and in validation:
   vocabulary. Accepted names are lowercased, deduplicated, and sorted; unknown names are dropped.
   Versions must match the release format or become `unknown`. Runtime catalog changes and
   network outages cannot widen the vocabulary or erase its history.
-- **Plausibility.** Raw rows are retained, so a skew attempt appears as a discontinuity in a
+- **Plausibility (legacy Analytics Engine only).** Raw rows are retained, so a skew attempt appears as a discontinuity in a
   dimension and can be discounted after the fact.
 
 An attacker willing to distribute traffic can still inflate counts for things that genuinely exist.
@@ -188,7 +212,8 @@ get attention, not billing or security decisions.
 - Raw numeric UTC offsets, coordinates, postal codes, or physical-device hardware details
 
 These Analytics Engine rows contain no direct user, account, install, or device identifier.
-Reports are not unique installations or users, and the service does not maintain per-install
+Legacy daily rows and outcome reports are not unique installations or users. The optional
+histogram estimates observed reporting installation-state roots without IDs; the service does not maintain per-install
 histories or retention curves.
 
 Cloudflare processes connection IP addresses, and the Worker uses them transiently for rate
@@ -200,7 +225,7 @@ processing is outside those settings.
 
 | Command or setting | Effect |
 | --- | --- |
-| `openclaw telemetry off` | Stops anonymous feature statistics. Update checks and default-on outcomes continue. |
+| `openclaw telemetry off` | Stops anonymous feature statistics and the companion installation-count POST. Update checks and default-on outcomes continue. |
 | `DO_NOT_TRACK=1` | Same, enforced from the environment. |
 | `update.checkOnStart: false` | Stops automatic update requests and outcome reporting. Explicit update commands and other configured services are separate. |
 
@@ -209,7 +234,8 @@ daily checks and schema-1 feature reports unless a replacement `OPENCLAW_TELEMET
 is explicitly configured. Outcome reports remain suppressed in CI even with a replacement endpoint.
 
 Disabling requests stops future automatic reports; it does not erase previously recorded rows.
-The same three-month Analytics Engine retention applies. This receiver adds no backup or export job.
+The same three-month Analytics Engine retention applies; the optional installation histogram
+has separate 90-day cleanup described above. This receiver adds no backup or export job.
 
 `openclaw telemetry show` displays policy and a CLI-built payload preview, not the exact next Gateway
 payload: registry state, configuration, and collection time can differ. It cannot preview

@@ -2,6 +2,7 @@ import { normalizeVersion } from "./allowlist.js";
 import { buildDataPoint } from "./analytics.js";
 import type { Env } from "./env.js";
 import { readCappedBody } from "./feature-stats.js";
+import { INSTALLATION_COUNT_HEADER, INSTALLATION_COUNT_USER_AGENT, parseInstallationCount, pruneInstallationCounts, recordInstallationCount } from "./installation-count.js";
 import { parseRequestGeography } from "./geography.js";
 import { parseClientIdentity, parseFeatureStats } from "./payload.js";
 import type { FeatureStats } from "./payload.js";
@@ -111,7 +112,10 @@ function recordRequest(request: Request, env: Env, features: FeatureStats | unde
 async function handleLatestVersion(request: Request, env: Env): Promise<Response> {
 	// Check recording quota exactly once, before reading any upload. Exhausted
 	// callers must still get a version answer even if their body never finishes.
-	if (!(await mayRecord(request, env))) return latestVersionResponse();
+	if (!(await mayRecord(request, env))) return latestVersionResponse(
+		Boolean(env.INSTALLATION_COUNTS) && request.method === "GET" &&
+		request.headers.get("user-agent") !== UPDATE_RESULT_USER_AGENT,
+	);
 
 	let parsed: unknown;
 	if (request.method === "POST") {
@@ -131,21 +135,79 @@ async function handleLatestVersion(request: Request, env: Env): Promise<Response
 			return latestVersionResponse();
 		}
 	}
-	recordRequest(request, env, parseFeatureStats(parsed));
-	return latestVersionResponse();
+	const features = parseFeatureStats(parsed);
+	recordRequest(request, env, features);
+	// A successful ordinary update answer can advertise counting support. Never
+	// infer capability from an outcome, an invalid feature upload or an error.
+	return latestVersionResponse(Boolean(env.INSTALLATION_COUNTS) &&
+		(request.method === "GET" || Boolean(features)) &&
+		request.headers.get("user-agent") !== UPDATE_RESULT_USER_AGENT);
 }
 
-async function latestVersionResponse(): Promise<Response> {
+async function latestVersionResponse(advertiseInstallationCount = false): Promise<Response> {
 	const latest = await fetchLatestVersion();
 	if (!latest) return jsonResponse({ error: "version_unavailable" }, 503);
-	return jsonResponse(RELEASE_NOTE ? { ...latest, note: RELEASE_NOTE } : latest, 200, VERSION_CACHE_SECONDS);
+	const response = jsonResponse(RELEASE_NOTE ? { ...latest, note: RELEASE_NOTE } : latest,
+		200, advertiseInstallationCount ? 0 : VERSION_CACHE_SECONDS);
+	if (advertiseInstallationCount) {
+		// Capture the authoritative day once, after the version lookup. The npm
+		// cache still works, but this day-bearing response must never be cached.
+		const day = Math.floor(Date.now() / 86_400_000);
+		response.headers.set(INSTALLATION_COUNT_HEADER, `1;${day}`);
+	}
+	return response;
+}
+
+function installationCountResponse(status: number): Response {
+	return new Response(null, { status, headers: { "cache-control": "no-store" } });
+}
+
+/** Validate provider-trusted HTTP framing synchronously; never read a stream. */
+function hasEmptyInstallationCountBody(request: Request): boolean {
+	if (request.headers.has("transfer-encoding")) return false;
+	const length = request.headers.get("content-length");
+	// Real workerd exposes a non-null stream even for a Node fetch POST with
+	// Content-Length: 0. Trust that physical HTTP framing, not stream EOF.
+	return length === "0" || (length === null && request.body === null);
+}
+
+async function handleInstallationCount(request: Request, env: Env): Promise<Response> {
+	const now = Date.now();
+	const count = parseInstallationCount(request.headers.get(INSTALLATION_COUNT_HEADER), now);
+	if (request.method !== "POST" || !count ||
+		request.headers.get("user-agent") !== INSTALLATION_COUNT_USER_AGENT) return installationCountResponse(400);
+	// Count requests never fall through to legacy analytics or a version lookup,
+	// even when malformed, quota-exhausted or unavailable. IP stays a limiter key.
+	if (!hasEmptyInstallationCountBody(request)) return installationCountResponse(400);
+	if (!(await mayRecord(request, env))) return installationCountResponse(204);
+	if (!env.INSTALLATION_COUNTS || request.headers.get("dnt") === "1") return installationCountResponse(204);
+	// The existing limiter await can cross midnight. Validate again at the
+	// write boundary and use that clock for retention pruning.
+	const recordedAt = Date.now();
+	if (!parseInstallationCount(request.headers.get(INSTALLATION_COUNT_HEADER), recordedAt)) return installationCountResponse(400);
+	try {
+		await recordInstallationCount(env.INSTALLATION_COUNTS, count, recordedAt);
+		return installationCountResponse(204);
+	} catch {
+		// Delivery can be ambiguous: no retry here or in the client, even on 503.
+		return installationCountResponse(503);
+	}
 }
 
 export default {
+	async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
+		await pruneInstallationCounts(env.INSTALLATION_COUNTS);
+	},
 	async fetch(request: Request, env: Env): Promise<Response> {
 		const url = new URL(request.url);
 
 		if (url.pathname === "/api/latest-version") {
+			// Header presence, not validity, selects the isolated count-only path.
+			// The fixed count UA also fails closed when its header is missing.
+			if (request.headers.has(INSTALLATION_COUNT_HEADER) ||
+				request.headers.get("user-agent") === INSTALLATION_COUNT_USER_AGENT) {
+				return handleInstallationCount(request, env);
+			}
 			// Capability only: no body, geography, recording quota, analytics or npm.
 			// Presence is not a delivery/readiness probe; never write a sample point.
 			if (request.method === "HEAD") {
