@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Publish checked public vocabulary through pull requests and verify the exact merged payload before the existing deployment step.
 - Batch main CodeQL analysis weekly while preserving PR and manual scans.
 
 - Accept identifier-free reporting-installation counts into an optional aggregate-only D1 `(day, gap, reports)` histogram with 90-day pruning; successful update answers advertise the server UTC day only when the binding exists, and production stays unbound. Thanks @roboclaw-bot.

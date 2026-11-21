@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { renderVocabulary } from "../scripts/public-vocabulary.mjs";
+import { checkPublication, publicationCases } from "./helpers/vocabulary-publication.mjs";
 import {
 	assertCurrentMain, assertDeployedCommit, collectReleases, deployedVersion,
 	needsDeployment, planReleases, readCandidate, validateCandidate,
@@ -119,39 +119,9 @@ describe("constrained publication", () => {
 		expect(() => assertCurrentMain(oldRevision, oldRevision)).not.toThrow();
 	});
 
-	it("rejects a native push when main advances after the publication guard", async () => {
-		const directory = await mkdtemp(join(tmpdir(), "vocabulary-publish-race-"));
-		const remote = join(directory, "remote.git");
-		const checkout = join(directory, "publisher");
-		const git = (...args) => execFileSync("git", ["-C", checkout, ...args], {
-			encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
-		});
-		const commit = async (value) => {
-			await writeFile(join(checkout, "data.json"), value);
-			git("add", "data.json");
-			git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
-				"-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", "commit", "-qm", "fixture");
-			return git("rev-parse", "HEAD").trim();
-		};
-		try {
-			await mkdir(checkout);
-			execFileSync("git", ["init", "--bare", "--quiet", remote]);
-			git("init", "--quiet");
-			git("remote", "add", "origin", remote);
-			const base = await commit("base");
-			git("push", "origin", "HEAD:refs/heads/main");
-			assertCurrentMain(base, git("ls-remote", "origin", "refs/heads/main").split("\t")[0]);
-			const concurrent = await commit("concurrent maintainer change");
-			git("push", "origin", "HEAD:refs/heads/main");
-			git("checkout", "--detach", base);
-			await commit("generated vocabulary");
-			const push = spawnSync("git", ["-C", checkout, "push", "origin", "HEAD:refs/heads/main"], { encoding: "utf8" });
-			expect(push.status).not.toBe(0);
-			expect(git("ls-remote", "origin", "refs/heads/main").split("\t")[0]).toBe(concurrent);
-		} finally {
-			await rm(directory, { recursive: true, force: true });
-		}
-	});
+	it.each(publicationCases)("verifies the PR publication boundary: %s", async (mode) => {
+		await checkPublication(mode);
+	}, 30_000);
 
 	it("reads only bounded regular artifact files and never executes generated source", async () => {
 		const directory = await mkdtemp(join(tmpdir(), "vocabulary-artifact-"));
