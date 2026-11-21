@@ -130,6 +130,7 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      statuses: write
     outputs:
       sha: ${{ steps.commit.outputs.sha }}
     steps:
@@ -207,6 +208,9 @@ jobs:
           # branch preparation observed a newer base. A moved main aborts here.
           test "$(git rev-parse "$PR_HEAD:data/public-vocabulary.json")" = "$DATA_BLOB"
           test "$(git rev-parse "$PR_HEAD:src/public-vocabulary.ts")" = "$SOURCE_BLOB"
+          # Keep candidate validation with this publisher; the neutral status
+          # supplies GitHub's strict up-to-date merge check, including base races.
+          node scripts/vocabulary-maintenance.mjs admit --target "$GITHUB_SHA" --head "$PR_HEAD"
           ready=false
           for ((attempt=0; attempt<15; attempt++)); do
             state=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq '[.head.sha,(.mergeable|tostring)] | @tsv')
@@ -224,10 +228,13 @@ jobs:
           if ! gh pr merge "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --squash --match-head-commit "$PR_HEAD"; then
             echo "Merge did not confirm success; checking the PR before continuing." >&2
           fi
-          receipt=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq '[.merged,.head.sha,.merge_commit_sha] | @tsv')
-          IFS=$'\t' read -r merged head sha <<< "$receipt"
+          receipt=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq '[.merged,.head.sha,.merge_commit_sha,.base.ref,.base.repo.full_name,.head.repo.full_name] | @tsv')
+          IFS=$'\t' read -r merged head sha base base_repo head_repo <<< "$receipt"
           test "$merged" = true
           test "$head" = "$PR_HEAD"
+          test "$base" = main
+          test "$base_repo" = "$GITHUB_REPOSITORY"
+          test "$head_repo" = "$GITHUB_REPOSITORY"
           test -n "$sha"
           gh auth setup-git
           git fetch --no-tags origin main:refs/remotes/origin/main "$sha"

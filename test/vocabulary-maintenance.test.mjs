@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { renderVocabulary } from "../scripts/public-vocabulary.mjs";
@@ -122,6 +122,19 @@ describe("constrained publication", () => {
 	it.each(publicationCases)("verifies the PR publication boundary: %s", async (mode) => {
 		await checkPublication(mode);
 	}, 30_000);
+
+	it("runs admission only from trusted code and retains the unchanged deployment recovery path", async () => {
+		const gate = await readFile(new URL("../.github/workflows/publication-admission.yml", import.meta.url), "utf8");
+		expect(gate).toContain("branches: [main]");
+		expect(gate).toContain("types: [opened, synchronize, reopened, edited, ready_for_review]");
+		expect(gate).toContain("ref: ${{ github.workflow_sha }}");
+		expect(gate).toContain("persist-credentials: false");
+		expect(gate).toContain("run: node scripts/vocabulary-maintenance.mjs gate");
+		expect(gate).not.toMatch(/pull_request\.head|npm (?:ci|install)|download-artifact/u);
+		const workflow = await readFile(new URL("../.github/workflows/deploy.yml", import.meta.url), "utf8");
+		expect(workflow).toContain("(needs.publish.result == 'skipped' && needs.discover.outputs.refresh == 'false')");
+		expect(workflow).toContain("TARGET_SHA: ${{ needs.publish.outputs.sha || github.sha }}");
+	});
 
 	it("reads only bounded regular artifact files and never executes generated source", async () => {
 		const directory = await mkdtemp(join(tmpdir(), "vocabulary-artifact-"));

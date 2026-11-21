@@ -1,0 +1,28 @@
+name: Publication admission gate
+
+on:
+  pull_request_target:
+    branches: [main]
+    types: [opened, synchronize, reopened, edited, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: read
+  statuses: write
+
+jobs:
+  inspect-publication-metadata:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout trusted base code
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.22.1
+      - name: Admit current pull request metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/vocabulary-maintenance.mjs gate
