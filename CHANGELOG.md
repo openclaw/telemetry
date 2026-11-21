@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Refresh Cloudflare Workers types and Vitest, and pin the Deploy workflow actions to the commits already in use. Thanks @vincentkoc.
 - Batch main CodeQL analysis weekly while preserving PR and manual scans.
 
 - Accept identifier-free reporting-installation counts into an optional aggregate-only D1 `(day, gap, reports)` histogram with 90-day pruning; successful update answers advertise the server UTC day only when the binding exists, and production stays unbound. Thanks @roboclaw-bot.
