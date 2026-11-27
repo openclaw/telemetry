@@ -11,6 +11,8 @@ const FILES = ["data/public-vocabulary.json", "src/public-vocabulary.ts"];
 const SHA = /^[a-f0-9]{40}$/u;
 const NAME = /^[a-z0-9][a-z0-9._/-]{0,63}$/u;
 const CONTEXT = "telemetry/deploy";
+const ADMISSION = "Publication merge admission";
+const ACTIONS_APP = 15368;
 const json = (value) => `${JSON.stringify(value, null, 2)}\n`;
 const equal = (actual, expected, message) => assert.deepEqual(actual, expected, message);
 const sorted = (values) => [...new Set(values)].sort();
@@ -119,6 +121,56 @@ export function assertCurrentMain(target, current) {
 	equal(immutable(target), immutable(current), "Main advanced; retry from current main instead of rolling back");
 }
 
+function currentPullRequest(repository, number, head) {
+	const pr = gh(`repos/${repository}/pulls/${number}`);
+	return pr.state === "open" && pr.base.ref === "main" &&
+		pr.base.repo.full_name === repository && pr.head.sha === head ? pr : null;
+}
+
+function admissionStatus(repository, head) {
+	gh(`repos/${repository}/statuses/${immutable(head)}`, "-f", "state=success",
+		"-f", `context=${ADMISSION}`, "-f", "description=Pull request metadata admitted");
+}
+
+function requirePublicationRules(repository) {
+	const rules = gh(`repos/${repository}/rules/branches/main`);
+	const configs = new Map();
+	const active = (rule) => {
+		if (!configs.has(rule.ruleset_id)) {
+			configs.set(rule.ruleset_id, gh(`repos/${repository}/rulesets/${rule.ruleset_id}`));
+		}
+		const config = configs.get(rule.ruleset_id);
+		// Metadata readers can receive redacted bypasses. An administrator must
+		// verify no bypass at activation; runtime rejects any exposed exception.
+		return config.enforcement === "active" &&
+			(!Object.hasOwn(config, "bypass_actors") ||
+				(Array.isArray(config.bypass_actors) && config.bypass_actors.length === 0)) &&
+			(!Object.hasOwn(config, "current_user_can_bypass") || config.current_user_can_bypass === "never");
+	};
+	assert(rules.some((rule) => rule.type === "non_fast_forward" && active(rule)),
+		"Publication held: missing active non-fast-forward protection");
+	assert(rules.some((rule) => rule.type === "required_status_checks" &&
+		rule.parameters?.strict_required_status_checks_policy === true &&
+		rule.parameters.required_status_checks.some((check) =>
+			check.context === ADMISSION && check.integration_id === ACTIONS_APP) && active(rule)),
+	"Publication held: missing strict GitHub Actions publication admission rule");
+}
+
+function admitPublication(repository, number, head, base) {
+	const pr = currentPullRequest(repository, number, head);
+	assert(pr?.head.repo?.full_name === repository, "Publication held: candidate PR identity changed");
+	equal(command("git", ["rev-list", "--parents", "-n", "1", immutable(head)]).trim().split(" "),
+		[head, immutable(base)], "Publication held: candidate must have only its validated source parent");
+	const changes = command("git", ["diff", "--no-renames", "--name-status", base, head]).trim().split("\n");
+	assert(changes.length > 0 && changes.every((line) => FILES.some((path) => line === `M\t${path}`)),
+		"Publication held: candidate must change only the two owned files without renames");
+	requirePublicationRules(repository);
+	assertCurrentMain(base, gh(`repos/${repository}/git/ref/heads/main`).object.sha);
+	assert(currentPullRequest(repository, number, head)?.head.repo?.full_name === repository,
+		"Publication held: candidate PR identity changed");
+	admissionStatus(repository, head);
+}
+
 /** Runs from trusted base code in check/publish jobs; candidate TypeScript is never imported. */
 export function validateCandidate(previous, candidate, generated, releases) {
 	keys(candidate, ["schemaVersion", "legacyAliases", "snapshots", "releases"]);
@@ -191,8 +243,26 @@ async function main() {
 	const { values, positionals } = parseArgs({ allowPositionals: true, options: {
 		base: { type: "string" }, event: { type: "string" }, source: { type: "string" },
 		artifact: { type: "string" }, target: { type: "string" },
+		head: { type: "string" },
 	} });
 	const [mode] = positionals;
+	if (mode === "gate") {
+		const event = JSON.parse(await readFile(process.env.GITHUB_EVENT_PATH, "utf8"));
+		const repository = process.env.GITHUB_REPOSITORY;
+		const pr = event.pull_request;
+		if (event.repository.default_branch === "main" && currentPullRequest(repository, pr.number, pr.head.sha)) {
+			// This status is commit-wide and neutral. Payload and provenance checks
+			// belong exclusively to the publisher, not other PRs sharing this SHA.
+			admissionStatus(repository, pr.head.sha);
+		} else {
+			console.log("Obsolete pull request event; no status written");
+		}
+		return;
+	}
+	if (mode === "admit") {
+		admitPublication(process.env.GITHUB_REPOSITORY, process.env.PR_NUMBER, values.head, values.target);
+		return;
+	}
 	if (mode === "guard-main") {
 		assertCurrentMain(values.target, gh("repos/openclaw/telemetry/git/ref/heads/main").object.sha);
 		return;
@@ -243,7 +313,7 @@ async function main() {
 		await writeFile(join(ROOT, FILES[0]), candidate.metadata);
 		await writeFile(join(ROOT, FILES[1]), candidate.source);
 	} else {
-		throw new Error("Use plan, generate, apply, guard-main, or verify-deployment");
+		throw new Error("Use plan, generate, apply, admit, gate, guard-main, or verify-deployment");
 	}
 }
 

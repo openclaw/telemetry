@@ -296,24 +296,37 @@ The existing Deploy workflow owns the whole update:
    then runs the normal checks, complete-vocabulary byte-budget tests, and Wrangler dry-run.
 4. A separate job can publish only `data/public-vocabulary.json` and `src/public-vocabulary.ts`.
    It checks the artifact again without installing dependencies or executing producer-supplied code.
-   Existing snapshots and aliases cannot change. Publication is a fast-forward from the exact
-   discovered main commit; concurrent changes stop it instead of overwriting source.
+   Existing snapshots and aliases cannot change. Publication uses a pull request and a normal
+   expected-head squash merge. The candidate must have exactly the validated source parent and
+   change only those two files. A strict GitHub Actions `Publication merge admission` status rule
+   rejects a merge if main advances after validation. The merged payload, parent, and current main
+   are verified again before deployment. Unmerged candidates are retained instead of replaced.
 5. The existing deployment job checks out the exact checked or published commit. All production
    runs share one concurrency group, and stale runs fail the current-main guard. The job tags the
    Worker with its commit and verifies that the newest deployment sends 100% of traffic to that
    exact tagged version before recording success. It retains the existing trusted npm/Wrangler
    toolchain; the artifact cannot replace package files, scripts, or workflow code.
 
-Generation never learns names from client requests. The publisher alone receives `contents: write`;
-the deployment job alone receives `statuses: write` and the existing `CLOUDFLARE_API_TOKEN`.
+Generation never learns names from client requests. The publisher alone receives `contents: write`
+and `pull-requests: write`. It and a trusted metadata-only `pull_request_target` gate can write the
+neutral admission status; the gate never executes candidate code. The deployment job retains its
+deployment status permission and alone receives the existing `CLOUDFLARE_API_TOKEN`.
 No new credential or cross-repository write is required. A commit made with `GITHUB_TOKEN` does not
 start the normal push workflow, so its checked deployment happens in the same run.
+
+Before enabling automatic publication, an administrator must activate and verify a default-branch
+rule requiring `Publication merge admission` from the GitHub Actions App (ID `15368`), with strict
+up-to-date checks and no bypass actors, plus non-fast-forward protection. The publisher verifies
+the effective rules before posting its own admission status; it does not depend on a new PR event.
+GitHub can redact bypass metadata from its token, so no-bypass configuration is an administrator
+admission check. Exposed bypasses or missing protection hold publication and retain the PR.
+Existing open PRs without this status need a normal handled PR event after activation.
 
 Merging this workflow into main enables daily generation, data-only publication, and deployment.
 Review that operational authority before activation. Coverage can lag until the next daily run plus
 GitHub queue delays. GitHub can disable schedules in inactive public repositories. Changed upstream
 metadata contracts, moved or deleted tags, incomplete pagination, byte-budget growth, and blocked
-fast-forward publication fail visibly and still need maintainer review; automation does not remove
+pull-request publication fail visibly and still need maintainer review; automation does not remove
 those maintenance boundaries. A failed rollout leaves a retryable status even if its source commit
 was already published. Inspect the failed Deploy run, repair the named contract or permission, then
 run Deploy manually from current main. Do not weaken the allowlist or force-push past a guard.
